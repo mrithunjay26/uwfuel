@@ -69,7 +69,7 @@ type Tab = "today" | "calendar" | "records" | "charts";
 
 export default function WorkoutLogPage() {
   const handle = useUserDb();
-  const { logs } = useWorkoutLogs();
+  const { logs, loading: logsLoading } = useWorkoutLogs();
   const { exercises: fbExercises } = useFirebaseExercises();
   const { template } = useActiveWorkoutTemplate();
   const today = todayPacificKey();
@@ -108,7 +108,13 @@ export default function WorkoutLogPage() {
           {([["today", "Today", Dumbbell], ["calendar", "Calendar", Calendar], ["records", "Records", Trophy], ["charts", "Charts", BarChart3]] as const).map(([id, label, Icon]) => (
             <button
               key={id}
-              onClick={() => setTab(id)}
+              onClick={() => {
+                if (id === "today") {
+                  setSelectedDate(today);
+                  setFocusExercise(null);
+                }
+                setTab(id);
+              }}
               className={`flex flex-1 items-center justify-center gap-1 rounded-[12px] py-2 text-[12px] font-bold transition ${
                 tab === id ? "glass-strong text-ink shadow-[var(--shadow-sm)]" : "text-ink-soft"
               }`}
@@ -126,6 +132,7 @@ export default function WorkoutLogPage() {
             date={selectedDate}
             existing={logsByDate[selectedDate]?.[0]}
             allLogs={logs}
+            loading={logsLoading}
             directory={directory}
             muscleByName={muscleByName}
             today={today}
@@ -155,11 +162,12 @@ export default function WorkoutLogPage() {
 }
 
 function TodayTab({
-  date, existing, allLogs, directory, muscleByName, today, template, focusExercise, onConsumeFocus, onChangeDate,
+  date, existing, allLogs, loading, directory, muscleByName, today, template, focusExercise, onConsumeFocus, onChangeDate,
 }: {
   date: string;
   existing?: WorkoutLogItem;
   allLogs: WorkoutLogItem[];
+  loading: boolean;
   directory: string[];
   muscleByName: Record<string, string>;
   today: string;
@@ -182,12 +190,16 @@ function TodayTab({
   // is often undefined and the tab seeds empty. Adopt the saved log once it
   // arrives — but only while there are no local edits, so we never clobber.
   useEffect(() => {
-    if (existing && logId === null && exercises.length === 0) {
+    if (existing) {
       setExercises(clone(existing.exercises));
       setLogId(existing.id);
+      return;
+    }
+    if (logId === null && exercises.length === 0) {
+      setExercises([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing]);
+  }, [date, existing?.id]);
 
   // Best prior numbers for an exercise (everything logged before this day, this log excluded).
   function priorStats(name: string) {
@@ -424,8 +436,12 @@ function TodayTab({
       {exercises.length === 0 && !showPicker && (
         <div className="glass-panel rounded-[18px] px-6 py-8 text-center">
           <span className="text-3xl">🏋️</span>
-          <p className="mt-2 text-[13px] font-semibold text-ink">Nothing logged for {date === today ? "today" : "this day"}</p>
-          <p className="text-[12px] text-ink-soft">Add an exercise to start tracking sets.</p>
+          <p className="mt-2 text-[13px] font-semibold text-ink">
+            {loading ? `Loading ${date === today ? "today's" : "this day's"} workout...` : `Nothing logged for ${date === today ? "today" : "this day"}`}
+          </p>
+          <p className="text-[12px] text-ink-soft">
+            {loading ? "Checking your saved workout log." : "Add an exercise to start tracking sets."}
+          </p>
         </div>
       )}
     </div>
