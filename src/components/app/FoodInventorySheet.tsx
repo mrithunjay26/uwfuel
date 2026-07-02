@@ -7,6 +7,7 @@ import { useFoodInventory, type InventoryItem } from "@/lib/hooks/useFoodInvento
 import { saveInventoryFood, deleteInventoryFood, updateInventoryFood } from "@/lib/db/userDb";
 import type { InventoryFood } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
+import { Portal } from "@/components/ui/Portal";
 
 export function FoodInventorySheet({
   open, onClose, onLog, dateLabel,
@@ -72,6 +73,7 @@ export function FoodInventorySheet({
   }
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[70] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
@@ -176,5 +178,6 @@ export function FoodInventorySheet({
         </div>
       </div>
     </div>
+    </Portal>
   );
 }

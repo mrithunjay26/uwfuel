@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useFoodLogDays } from "@/lib/hooks/useFoodLogDays";
+import { Portal } from "@/components/ui/Portal";
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const MONTHS = [
@@ -44,6 +45,7 @@ export function MealCalendarSheet({
     });
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[75] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
       <div className="animate-rise relative mt-auto rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]">
@@ -98,5 +100,6 @@ export function MealCalendarSheet({
         </button>
       </div>
     </div>
+    </Portal>
   );
 }

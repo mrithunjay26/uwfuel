@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, Clock, MapPin, Pencil, Trash2, X } from "lucide-react";
 import { formatMoney } from "@/lib/utils/nutrition";
+import { Portal } from "@/components/ui/Portal";
 import type { FoodLogItem } from "@/lib/hooks/useFoodLog";
 import type { FoodLogEntry } from "@/lib/db/types";
 
@@ -59,6 +60,7 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
   ];
 
   return (
+    <Portal>
     <>
       <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div
@@ -182,6 +184,7 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
         </div>
       </div>
     </>
+    </Portal>
   );
 }
 

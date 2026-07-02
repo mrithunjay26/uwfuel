@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Activity, BellRing, Check, Contrast, Gauge, Hand, Image as ImageIcon, LayoutGrid, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { useTheme } from "@/lib/theme/ThemeContext";
+import { Portal } from "@/components/ui/Portal";
 import {
   ACCENT_PRESETS,
   BG_PRESETS,
@@ -49,6 +50,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
   if (!open) return null;
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[70] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
@@ -71,7 +73,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
           </div>
         </div>
 
-        <div className="thin-scrollbar flex flex-col gap-6 overflow-y-auto px-5 py-5">
+        <div className="thin-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
 
           <section className="customizer-hero relative overflow-hidden rounded-[22px] border border-accent/20 p-4">
             <div className="relative z-10 flex items-start gap-3">
@@ -450,6 +452,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 

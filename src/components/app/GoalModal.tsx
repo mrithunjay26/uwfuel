@@ -6,6 +6,7 @@ import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { saveProfile, saveWeight } from "@/lib/db/userDb";
+import { Portal } from "@/components/ui/Portal";
 import { todayPacificKey } from "@/lib/firebase/dining";
 import { weeklyChangeFromGoal, dailyTargetCalories } from "@/lib/utils/nutrition";
 import type { GoalPhase, UserProfile } from "@/lib/db/types";
@@ -119,6 +120,7 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
   if (!open) return null;
 
   return (
+    <Portal>
     <>
       <div
         className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
@@ -268,5 +270,6 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
         </div>
       </div>
     </>
+    </Portal>
   );
 }

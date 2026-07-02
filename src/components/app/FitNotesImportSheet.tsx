@@ -5,6 +5,7 @@ import { Check, Loader2, Upload, X } from "lucide-react";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { logWorkout } from "@/lib/db/userDb";
 import { parseFitNotesCsv, type FitNotesImportResult } from "@/lib/workout/fitnotesImport";
+import { Portal } from "@/components/ui/Portal";
 import { haptic } from "@/lib/utils/haptics";
 
 type Phase = "pick" | "preview" | "importing" | "done";
@@ -63,6 +64,7 @@ export function FitNotesImportSheet({ open, onClose }: { open: boolean; onClose:
   }
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[75] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={close} />
       <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]">
@@ -130,5 +132,6 @@ export function FitNotesImportSheet({ open, onClose }: { open: boolean; onClose:
         )}
       </div>
     </div>
+    </Portal>
   );
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, BellOff, ChevronRight, Clock, MapPin, Sparkles, X } from "lucide-react";
 import { useConfig } from "@/lib/config/ConfigContext";
+import { Portal } from "@/components/ui/Portal";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
@@ -224,6 +225,7 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
   const hasPlan = !!activePlan;
 
   return (
+    <Portal>
     <>
       <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div
@@ -378,6 +380,7 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
         </div>
       </div>
     </>
+    </Portal>
   );
 }
 

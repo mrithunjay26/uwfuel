@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, MapPin, Plus, Route, Trash2, X } from "lucide-react";
 import { useUserDb } from "@/lib/hooks/useUserDb";
+import { Portal } from "@/components/ui/Portal";
 import { saveClassSchedule } from "@/lib/db/userDb";
 import { ClassLocationPicker } from "@/components/app/ClassLocationPicker";
 import { DayRouteMap, type DayRoutePoint } from "@/components/app/DayRouteMap";
@@ -166,6 +167,7 @@ export function ClassScheduleModal({ open, initial, onClose }: ClassScheduleModa
   const stops = schedule[activeDay];
 
   return (
+    <Portal>
     <>
       <div
         className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
@@ -369,5 +371,6 @@ export function ClassScheduleModal({ open, initial, onClose }: ClassScheduleModa
         </div>
       </div>
     </>
+    </Portal>
   );
 }

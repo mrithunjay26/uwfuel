@@ -16,6 +16,8 @@ import { matchCampusItem } from "@/lib/nutrition/campusMatch";
 import { estimateMacros, estimateProteinGrams } from "@/lib/utils/nutrition";
 import { scanImage, scanText, scanBarcode, searchFoods, type ScannedFood } from "@/lib/nutrition/scan";
 import type { FlatMenuItem } from "@/lib/menu/flattenMenu";
+import type { FoodFundingSource } from "@/lib/db/types";
+import { Portal } from "@/components/ui/Portal";
 import { assessDietarySafety } from "@/lib/dietary/safety";
 import { haptic } from "@/lib/utils/haptics";
 
@@ -34,6 +36,7 @@ interface EditableFood {
   locationName: string;
   locationId: string;
   price: number;
+  funding: FoodFundingSource;
   isCustom: boolean;
 }
 
@@ -63,6 +66,7 @@ function toEditable(food: ScannedFood, menu: FlatMenuItem[]): EditableFood {
     locationName: food.brand || "Scan",
     locationId: "scan",
     price: 0,
+    funding: "unknown",
     isCustom: true,
   };
 }
@@ -77,6 +81,7 @@ function blankFood(): EditableFood {
     locationName: "Manual",
     locationId: "manual",
     price: 0,
+    funding: "unknown",
     isCustom: true,
   };
 }
@@ -309,6 +314,10 @@ export function MealScannerSheet({
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, [key]: Math.max(0, val) } : f)));
   const setName = (id: string, name: string) =>
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
+  const setPrice = (id: string, price: number) =>
+    setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, price: Math.max(0, price) } : f)));
+  const setFunding = (id: string, funding: FoodFundingSource) =>
+    setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, funding } : f)));
   const removeFood = (id: string) => setFoods((prev) => prev.filter((f) => f.id !== id));
   const addManualFood = () => setFoods((prev) => [...prev, blankFood()]);
 
@@ -340,7 +349,8 @@ export function MealScannerSheet({
         match: null,
         locationName: "Scan",
         locationId: "scan",
-        price: 0,
+        price: prev.reduce((s, f) => s + f.price * f.servings, 0),
+        funding: prev.find((f) => f.funding !== "unknown")?.funding ?? "unknown",
         isCustom: true,
       }];
     });
@@ -397,7 +407,7 @@ export function MealScannerSheet({
           location_id: f.locationId,
           location_name: f.locationName,
           is_custom: f.isCustom,
-          funding_source: "personal",
+          funding_source: f.funding,
         });
       }
       haptic("medium");
@@ -415,6 +425,7 @@ export function MealScannerSheet({
   const cameraMode = mode === "photo" || mode === "barcode";
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[80] flex flex-col bg-black">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3">
@@ -714,6 +725,39 @@ export function MealScannerSheet({
                         <Flame className="size-3 text-flame" /> {Math.round(f.calories * m)} kcal total · {Math.round(f.protein * m)}g protein
                       </p>
                     )}
+
+                    {/* Price & how it was paid — same fields the journal shows */}
+                    <div className="mt-2.5 grid grid-cols-2 gap-2">
+                      <label className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                        Price
+                        <div className="mt-1 flex items-center rounded-[10px] border border-line bg-surface-2 px-2.5">
+                          <span className="text-[13px] text-ink-faint">$</span>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step={0.01}
+                            value={f.price || ""}
+                            onChange={(e) => setPrice(f.id, Number(e.target.value) || 0)}
+                            placeholder="0.00"
+                            className="w-full bg-transparent py-2 pl-1 text-[13px] font-semibold text-ink outline-none"
+                          />
+                        </div>
+                      </label>
+                      <label className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                        Paid with
+                        <select
+                          value={f.funding}
+                          onChange={(e) => setFunding(f.id, e.target.value as FoodFundingSource)}
+                          className="mt-1 w-full rounded-[10px] border border-line bg-surface-2 px-2.5 py-2 text-[13px] normal-case text-ink outline-none"
+                        >
+                          <option value="unknown">Not tracked</option>
+                          <option value="dining_plan">Dining Plan</option>
+                          <option value="husky_card">Husky Card</option>
+                          <option value="personal">Personal</option>
+                        </select>
+                      </label>
+                    </div>
                   </div>
                 );
               })}
@@ -796,5 +840,6 @@ export function MealScannerSheet({
         </div>
       )}
     </div>
+    </Portal>
   );
 }
