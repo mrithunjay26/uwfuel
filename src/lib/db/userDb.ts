@@ -114,6 +114,17 @@ export async function saveOnboardingProfile(
   await set(ref(db, PATHS.onboardingProfile(uid)), { ...profile, updated_at: nowIso() } satisfies OnboardingProfile);
 }
 
+export async function setOnboardingChecklistHidden(
+  db: Database,
+  uid: string,
+  hidden: boolean,
+): Promise<void> {
+  await update(ref(db, PATHS.onboardingProfile(uid)), {
+    checklist_hidden: hidden,
+    updated_at: nowIso(),
+  });
+}
+
 export async function saveFoodExpense(
   db: Database,
   uid: string,

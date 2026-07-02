@@ -37,6 +37,7 @@ import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { logWorkout, updateWorkoutLog, deleteWorkoutLog, clearActiveWorkoutTemplate, saveWorkoutScheduleOverride } from "@/lib/db/userDb";
 import { todayPacificKey } from "@/lib/firebase/dining";
 import { bodyPartFromName, resolveBodyPart, colorForBodyPart, BODY_PART_COLORS, BODY_PARTS } from "@/lib/workout/bodyParts";
+import { buildExerciseStats, searchExercises, relDaysLabel as relDays } from "@/lib/workout/exerciseSearch";
 import { loggerExercisesFromPlan, workoutDayForDate } from "@/lib/workout/plans";
 import { haptic } from "@/lib/utils/haptics";
 import type { ExerciseType, LoggedSet, WorkoutLogExercise, WorkoutLogItem, WorkoutPlanDay } from "@/lib/db/types";
@@ -72,38 +73,6 @@ const e1rm = (w: number, r: number) => (w > 0 && r > 0 ? w * (1 + r / 30) : 0);
 
 // Lightweight fuzzy matcher: exact substrings score highest, then subsequence
 // matches with word-start & streak bonuses. Returns -1 when there's no match.
-function fuzzyScore(query: string, target: string): number {
-  const q = query.toLowerCase().trim();
-  const t = target.toLowerCase();
-  if (!q) return 0;
-  const at = t.indexOf(q);
-  if (at !== -1) return 200 - at * 2; // substring: earlier = better
-  let qi = 0, score = 0, streak = 0, prev = -2;
-  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-    if (t[ti] === q[qi]) {
-      streak = prev === ti - 1 ? streak + 1 : 1;
-      const wordStart = ti === 0 || t[ti - 1] === " ";
-      score += streak + (wordStart ? 4 : 1);
-      prev = ti;
-      qi++;
-    }
-  }
-  return qi === q.length ? score : -1;
-}
-
-function relDaysLabel(from: string, to: string): string {
-  const a = Date.parse(`${from}T00:00:00`);
-  const b = Date.parse(`${to}T00:00:00`);
-  if (isNaN(a) || isNaN(b)) return "";
-  const d = Math.round((b - a) / 86400000);
-  if (d <= 0) return "today";
-  if (d === 1) return "yesterday";
-  if (d < 7) return `${d}d ago`;
-  if (d < 31) return `${Math.round(d / 7)}w ago`;
-  if (d < 365) return `${Math.round(d / 30)}mo ago`;
-  return `${Math.round(d / 365)}y ago`;
-}
-
 type Tab = "today" | "calendar" | "records" | "charts";
 
 export default function WorkoutLogPage() {
@@ -399,48 +368,14 @@ function TodayTab({
   }
 
   // How often / how recently each exercise has been done (across all logs).
-  const exerciseStats = useMemo(() => {
-    const m = new Map<string, { name: string; count: number; lastDate: string }>();
-    for (const l of allLogs) {
-      for (const ex of l.exercises) {
-        if (!ex.sets?.length) continue;
-        const k = norm(ex.name);
-        const cur = m.get(k);
-        if (!cur) m.set(k, { name: ex.name, count: 1, lastDate: l.date });
-        else { cur.count += 1; if (l.date > cur.lastDate) cur.lastDate = l.date; }
-      }
-    }
-    return m;
-  }, [allLogs]);
+  const exerciseStats = useMemo(() => buildExerciseStats(allLogs), [allLogs]);
 
   // Search matrix: previously-done exercises rank first (with recency + count),
   // fuzzy-matched so half-remembered names still surface.
-  const pickerResults = useMemo(() => {
-    const names = new Map<string, string>();
-    directory.forEach((n) => names.set(norm(n), n));
-    exerciseStats.forEach((s, k) => { if (!names.has(k)) names.set(k, s.name); });
-    const list = [...names.entries()].map(([k, name]) => {
-      const st = exerciseStats.get(k);
-      return { name, count: st?.count ?? 0, lastDate: st?.lastDate ?? null };
-    });
-    const q = pickerSearch.trim();
-    if (!q) {
-      return list
-        .sort((a, b) => {
-          if (a.lastDate && b.lastDate) return b.lastDate.localeCompare(a.lastDate);
-          if (a.lastDate) return -1;
-          if (b.lastDate) return 1;
-          return a.name.localeCompare(b.name);
-        })
-        .slice(0, 60);
-    }
-    return list
-      .map((e) => ({ e, raw: fuzzyScore(q, e.name) }))
-      .filter((x) => x.raw >= 0)
-      .sort((a, b) => (b.raw + (b.e.lastDate ? 60 : 0)) - (a.raw + (a.e.lastDate ? 60 : 0)))
-      .slice(0, 40)
-      .map((x) => x.e);
-  }, [directory, exerciseStats, pickerSearch]);
+  const pickerResults = useMemo(
+    () => searchExercises(directory, exerciseStats, pickerSearch),
+    [directory, exerciseStats, pickerSearch],
+  );
 
   const isNewName = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
@@ -525,7 +460,7 @@ function TodayTab({
                   <span className="block truncate text-[13px] font-semibold text-ink">{r.name}</span>
                   {r.lastDate ? (
                     <span className="flex items-center gap-1.5 text-[10px] text-ink-faint">
-                      <History className="size-2.5" /> {relDaysLabel(r.lastDate, today)} · {r.count}×
+                      <History className="size-2.5" /> {relDays(r.lastDate, today)} · {r.count}×
                     </span>
                   ) : (
                     muscleByName[norm(r.name)] && <span className="text-[10px] text-ink-faint">{muscleByName[norm(r.name)]}</span>

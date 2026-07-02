@@ -104,6 +104,7 @@ export interface OnboardingProfile {
   personal_wallet: PersonalFoodWallet;
   cooking: CookingProfile;
   dietary: DietarySafetyProfile;
+  checklist_hidden?: boolean;
   updated_at: string;
 }
 

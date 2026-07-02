@@ -201,6 +201,40 @@ export function scoreMenuItem(
   return score;
 }
 
+const NON_MEAL_NAME_TERMS = [
+  "cream cheese", "butter", "margarine", "sour cream", "mayonnaise", "mayo",
+  "ketchup", "mustard", "dressing", "syrup", "jam", "jelly", "relish",
+  "salsa", "gravy", "aioli", "hot sauce", "soy sauce", "seasoning", "topping",
+  "add on", "side of",
+];
+const NON_MEAL_CATEGORY_TERMS = ["condiment", "topping", "sauce", "spread", "add-on", "add on"];
+const MEAL_CATEGORY_TERMS = ["entree", "entrée", "bowl", "grill", "sandwich", "burger", "pizza", "pasta", "breakfast", "lunch", "dinner", "deli", "global"];
+
+/** Keeps dashboard recommendations focused on complete, purchasable meals—not add-ons. */
+export function isMealRecommendationCandidate(item: FlatMenuItem): boolean {
+  if (!item.available_now || item.is_beverage || item.price < 1.5) return false;
+  const name = item.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const category = item.category_name.toLowerCase();
+  if (NON_MEAL_CATEGORY_TERMS.some((term) => category.includes(term))) return false;
+  if (NON_MEAL_NAME_TERMS.some((term) => name === term || name.startsWith(`${term} `) || name.endsWith(` ${term}`))) return false;
+  const calories = Math.max(0, item.calories);
+  const protein = Math.max(0, item.protein_grams);
+  return (calories >= 220 && protein >= 10) || (calories >= 350 && protein >= 6) || (calories >= 150 && protein >= 20);
+}
+
+export function scoreMealRecommendation(item: FlatMenuItem, dailyBudget: number): number {
+  if (!isMealRecommendationCandidate(item)) return Number.NEGATIVE_INFINITY;
+  const category = item.category_name.toLowerCase();
+  const categoryBonus = MEAL_CATEGORY_TERMS.some((term) => category.includes(term)) ? 24 : 0;
+  const budgetPenalty = dailyBudget > 0 && item.price > dailyBudget ? (item.price - dailyBudget) * 14 : 0;
+  return item.protein_grams * 4
+    + Math.min(item.calories, 850) * 0.035
+    - Math.abs(item.calories - 600) * 0.02
+    - item.price * 1.2
+    - budgetPenalty
+    + categoryBonus;
+}
+
 export type MenuFilter = "all" | "available" | "vegan" | "vegetarian" | "low-cal" | "hi-protein" | "halal";
 
 const VEGAN_ALLERGENS = ["dairy", "milk", "egg", "eggs", "meat", "fish", "seafood", "poultry", "chicken", "beef", "pork"];

@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarCheck2, Check, ChevronDown, ChevronUp, History, Plus, Save, Trash2, X } from "lucide-react";
+import { CalendarCheck2, Check, ChevronDown, ChevronUp, History, Plus, Save, Search, Trash2, X } from "lucide-react";
 import { clearActiveWorkoutPlan, deleteWorkoutPlan, setActiveWorkoutPlan, updateWorkoutPlan } from "@/lib/db/userDb";
 import { useActiveWorkoutPlan } from "@/lib/hooks/useActiveWorkoutPlan";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useWorkoutPlans } from "@/lib/hooks/useWorkoutPlans";
+import { useWorkoutLogs } from "@/lib/hooks/useWorkoutLogs";
+import { todayPacificKey } from "@/lib/firebase/dining";
+import { buildExerciseStats, searchExercises, relDaysLabel, type ExStat } from "@/lib/workout/exerciseSearch";
 import type { WorkoutLogExercise, WorkoutPlan, WorkoutPlanDay, WorkoutPlanItem } from "@/lib/db/types";
 import { WEEKDAYS, WEEKDAY_LABELS, cloneTemplateExercise } from "@/lib/workout/plans";
 
@@ -27,9 +30,11 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
   const handle = useUserDb();
   const { plans, loading } = useWorkoutPlans();
   const active = useActiveWorkoutPlan();
+  const { logs } = useWorkoutLogs();
+  const stats = useMemo(() => buildExerciseStats(logs), [logs]);
+  const today = todayPacificKey();
   const [draft, setDraft] = useState<WorkoutPlanItem | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [newExercise, setNewExercise] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,16 +65,16 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
     setExpanded(day.is_rest ? day.weekday : null);
   }
 
-  function addExercise(day: WorkoutPlanDay) {
-    const name = (newExercise[day.weekday] ?? "").trim();
+  function addExerciseNamed(day: WorkoutPlanDay, rawName: string) {
+    const name = rawName.trim();
     if (!name) return;
     editDay(day.weekday, (current) => ({
       ...current,
       is_rest: false,
       label: current.label === "Rest" ? "Workout" : current.label,
+      // Preserve the exact prior exercise name so its logged history carries over.
       exercises: [...current.exercises, { name, sets: Array.from({ length: 3 }, () => ({ weight: 0, reps: 10 })) }],
     }));
-    setNewExercise((current) => ({ ...current, [day.weekday]: "" }));
   }
 
   function editExercise(day: WorkoutPlanDay, index: number, patch: Partial<WorkoutLogExercise>) {
@@ -182,10 +187,12 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
                           );
                         })}
                       </div>
-                      <div className="mt-2 flex gap-2">
-                        <input list="workout-plan-exercises" value={newExercise[day.weekday] ?? ""} onChange={(event) => setNewExercise((current) => ({ ...current, [day.weekday]: event.target.value }))} onKeyDown={(event) => { if (event.key === "Enter") addExercise(day); }} placeholder="Add an exercise…" className="min-w-0 flex-1 rounded-[10px] border border-dashed border-line-strong bg-surface px-3 py-2 text-[12px] text-ink outline-none focus:border-accent" />
-                        <button onClick={() => addExercise(day)} className="press grid size-9 place-items-center rounded-[10px] bg-accent text-accent-contrast"><Plus className="size-4" /></button>
-                      </div>
+                      <PlanExercisePicker
+                        directory={exerciseNames}
+                        stats={stats}
+                        today={today}
+                        onAdd={(name) => addExerciseNamed(day, name)}
+                      />
                     </div>
                   )}
                 </div>
@@ -193,7 +200,6 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
             })}
           </div>
 
-          <datalist id="workout-plan-exercises">{exerciseNames.slice(0, 800).map((name) => <option key={name} value={name} />)}</datalist>
           <div className="mt-4 flex gap-2">
             <button onClick={saveAndActivate} className="press flex flex-1 items-center justify-center gap-2 rounded-[13px] bg-accent py-3 text-[13px] font-bold text-accent-contrast"><CalendarCheck2 className="size-4" /> Save &amp; set schedule</button>
             <button onClick={removeCurrent} aria-label="Delete plan" className="press grid size-11 place-items-center rounded-[13px] bg-danger/10 text-danger"><Trash2 className="size-4" /></button>
@@ -207,5 +213,70 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
         </div>
       )}
     </section>
+  );
+}
+
+// Log-tab-style exercise search: recents first (last done + count), fuzzy, plus
+// a "add new" option. Adds the exact chosen name so history carries into the logger.
+function PlanExercisePicker({
+  directory, stats, today, onAdd,
+}: {
+  directory: string[];
+  stats: Map<string, ExStat>;
+  today: string;
+  onAdd: (name: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const results = useMemo(() => searchExercises(directory, stats, query), [directory, stats, query]);
+  const trimmed = query.trim();
+  const exactExists = results.some((r) => r.name.toLowerCase() === trimmed.toLowerCase());
+
+  function pick(name: string) {
+    onAdd(name);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
+        <input
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+          onKeyDown={(event) => { if (event.key === "Enter" && trimmed) pick(trimmed); }}
+          placeholder="Search or add an exercise…"
+          className="w-full rounded-[10px] border border-dashed border-line-strong bg-surface py-2 pl-8 pr-3 text-[12px] text-ink outline-none focus:border-accent"
+        />
+      </div>
+      {open && (
+        <div className="thin-scrollbar mt-1.5 flex max-h-52 flex-col gap-1 overflow-y-auto rounded-[10px] border border-line bg-surface p-1">
+          {trimmed && !exactExists && (
+            <button onClick={() => pick(trimmed)} className="flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left hover:bg-surface-2">
+              <Plus className="size-3.5 shrink-0 text-accent" />
+              <span className="truncate text-[12px] font-semibold text-ink">Add “{trimmed}”</span>
+            </button>
+          )}
+          {results.map((r) => (
+            <button key={r.name} onClick={() => pick(r.name)} className="flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left hover:bg-surface-2">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12px] font-semibold text-ink">{r.name}</span>
+                {r.lastDate && (
+                  <span className="flex items-center gap-1 text-[10px] text-ink-faint">
+                    <History className="size-2.5" /> {relDaysLabel(r.lastDate, today)} · {r.count}×
+                  </span>
+                )}
+              </span>
+              <Plus className="size-3.5 shrink-0 text-accent" />
+            </button>
+          ))}
+          {results.length === 0 && !trimmed && (
+            <p className="px-2.5 py-2 text-[11px] text-ink-faint">Start typing to find an exercise.</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

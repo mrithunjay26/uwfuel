@@ -78,8 +78,6 @@ export default function MenuPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setDataLoading(true);
-    setDataError(null);
 
     async function load() {
       try {
@@ -167,10 +165,24 @@ export default function MenuPage() {
       g.stations.some((s) => s.id === locationParam),
     );
     if (group) {
-      setSelectedGroup(group.name);
-      setPageTab("menu");
+      queueMicrotask(() => {
+        setSelectedGroup(group.name);
+        setPageTab("menu");
+      });
     }
   }, [searchParams, locationGroups]);
+
+  useEffect(() => {
+    const itemKey = searchParams.get("item");
+    if (!itemKey || allItems.length === 0) return;
+    const match = allItems.find((item) => item.unique_key === itemKey || item.item_id === itemKey);
+    if (match) {
+      queueMicrotask(() => {
+        setDetailItem(match);
+        setPageTab("menu");
+      });
+    }
+  }, [searchParams, allItems]);
 
   const handleLocationSelect = useCallback(
     (locId: string) => {

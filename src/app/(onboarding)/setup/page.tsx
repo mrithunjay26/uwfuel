@@ -94,6 +94,7 @@ export default function AdaptiveSetupPage() {
       },
       personal_wallet: { monthly_budget: Math.max(0, Number(monthlyBudget) || 0), ...(Number(groceryTarget) > 0 ? { grocery_target: Number(groceryTarget) } : {}), cycle_day: 1 },
       cooking: { kitchen_access: kitchen, cooked_meals_per_week: cookedMeals },
+      checklist_hidden: existing?.checklist_hidden ?? false,
       dietary: {
         styles, allergens,
         hard_exclusions: exclusions.split(",").map((item) => item.trim()).filter(Boolean),

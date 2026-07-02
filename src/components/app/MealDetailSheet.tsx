@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { createPortal } from "react-dom";
 import { Check, Clock, Leaf, MapPin, Plus, ShoppingBag, X } from "lucide-react";
 import { estimateMacros, estimateProteinGrams } from "@/lib/utils/nutrition";
 import { isOrderable, orderUrlFor, needsSearchAssist } from "@/lib/dining/ordering";
@@ -14,7 +15,7 @@ interface MealDetailSheetProps {
 }
 
 export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailSheetProps) {
-  if (!item) return null;
+  if (!item || typeof document === "undefined") return null;
 
   const protein = item.protein_grams > 0
     ? item.protein_grams
@@ -32,7 +33,7 @@ export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailS
     { label: "Fat", value: Math.round(fat).toString(), unit: fatEstimated ? "g*" : "g", color: "text-fat" },
   ];
 
-  return (
+  return createPortal(
     <>
       <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div
@@ -156,6 +157,7 @@ export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailS
           </p>
         )}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

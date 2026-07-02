@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { CalendarPlus, Check, ChevronRight, CircleDollarSign, ClipboardCheck, Dumbbell, Gauge, Plus, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
+import { CalendarPlus, Check, ChevronRight, CircleDollarSign, ClipboardCheck, Dumbbell, Eye, EyeOff, Gauge, Plus, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { useFoodExpenses } from "@/lib/hooks/useFoodExpenses";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
@@ -16,7 +16,7 @@ import { computeBudgetSnapshot } from "@/lib/budget/compute";
 import { buildDailyAgenda } from "@/lib/agenda/build";
 import { filterSafeCandidates } from "@/lib/dietary/safety";
 import { mergeClassSchedules, parseIcsSchedule } from "@/lib/schedule/ics";
-import { saveClassSchedule, saveFoodExpense, saveReadinessCheck } from "@/lib/db/userDb";
+import { saveClassSchedule, saveFoodExpense, setOnboardingChecklistHidden } from "@/lib/db/userDb";
 import { workoutDayForDate } from "@/lib/workout/plans";
 import type { FoodExpenseCategory, FoodFundingSource } from "@/lib/db/types";
 
@@ -51,19 +51,16 @@ export function EverydayOverview({ today }: { today: string }) {
     setExpenseAmount(""); setExpenseOpen(false); setSaving(false);
   }
 
-  async function checkReadiness(key: "sleep" | "soreness" | "energy", value: 1 | 2 | 3 | 4 | 5) {
-    if (!handle) return;
-    await saveReadinessCheck(handle.db, handle.uid, today, {
-      sleep: key === "sleep" ? value : readiness?.sleep ?? 3,
-      soreness: key === "soreness" ? value : readiness?.soreness ?? 3,
-      energy: key === "energy" ? value : readiness?.energy ?? 3,
-    });
-  }
 
   async function importCalendar(file: File) {
     if (!handle) return;
     const imported = parseIcsSchedule(await file.text());
     await saveClassSchedule(handle.db, handle.uid, mergeClassSchedules(schedule, imported));
+  }
+
+  async function setChecklistHidden(hidden: boolean) {
+    if (!handle) return;
+    await setOnboardingChecklistHidden(handle.db, handle.uid, hidden).catch(() => {});
   }
 
   if (setupLoading) return <div className="mb-5 h-40 rounded-[22px] skeleton" />;
@@ -94,18 +91,12 @@ export function EverydayOverview({ today }: { today: string }) {
       {expenseOpen && <div className="mt-3 flex gap-2"><select value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value as FoodExpenseCategory)} className="min-w-0 flex-1 rounded-[11px] border border-line bg-surface-2 px-2 text-[12px] text-ink"><option value="groceries">Groceries</option><option value="off_campus_meal">Off-campus meal</option><option value="campus_meal">Campus meal</option><option value="other_food">Other food</option></select><input aria-label="Expense amount" type="number" min={0} value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="$0.00" className="w-24 rounded-[11px] border border-line bg-surface-2 px-2 text-[12px] text-ink outline-none" /><button disabled={saving} onClick={() => void addExpense()} className="rounded-[11px] bg-accent px-3 text-[11px] font-bold text-accent-contrast">Save</button></div>}
     </section>
 
-    <section className="glass-panel rounded-[22px] p-4">
-      <div className="flex items-center gap-2"><Gauge className="size-[18px] text-accent" /><h2 className="font-display text-[16px] font-extrabold text-ink">Readiness</h2></div>
-      <p className="mt-1 text-[11px] text-ink-soft">Three taps help today’s plan match the body you brought.</p>
-      <div className="mt-3 flex flex-col gap-2">{([['sleep','Sleep'],['energy','Energy'],['soreness','Soreness']] as const).map(([key,label]) => <div key={key} className="flex items-center gap-2"><span className="w-16 text-[11px] font-bold text-ink-soft">{label}</span><div className="flex flex-1 gap-1">{([1,2,3,4,5] as const).map((value) => <button key={value} aria-label={`${label} ${value} of 5`} onClick={() => void checkReadiness(key, value)} className={`grid h-8 flex-1 place-items-center rounded-[9px] text-[11px] font-bold ${(readiness?.[key] ?? 0) === value ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"}`}>{value}</button>)}</div></div>)}</div>
-    </section>
-
-    <section id="calendar-import" className="glass-panel rounded-[22px] p-4">
-      <div className="flex items-center justify-between"><div className="flex items-center gap-2"><CalendarPlus className="size-[18px] text-accent" /><h2 className="font-display text-[16px] font-extrabold text-ink">Setup checklist</h2></div><span className="text-[11px] font-bold text-ink-faint">{checklist.filter((item) => item.done).length}/{checklist.length}</span></div>
+    {!setup.checklist_hidden ? <section id="calendar-import" className="glass-panel rounded-[22px] p-4">
+      <div className="flex items-center justify-between"><div className="flex items-center gap-2"><CalendarPlus className="size-[18px] text-accent" /><h2 className="font-display text-[16px] font-extrabold text-ink">Setup checklist</h2></div><div className="flex items-center gap-2"><span className="text-[11px] font-bold text-ink-faint">{checklist.filter((item) => item.done).length}/{checklist.length}</span><button aria-label="Hide setup checklist" title="Hide checklist" onClick={() => void setChecklistHidden(true)} className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-faint hover:text-ink"><EyeOff className="size-3.5" /></button></div></div>
       <div className="mt-3 grid grid-cols-2 gap-2">{checklist.map((item) => item.label === "Class schedule" ? <button key={item.label} onClick={() => fileRef.current?.click()} className="flex items-center gap-2 rounded-[13px] bg-surface-2 p-2.5 text-left"><Status done={item.done} /><span className="text-[11px] font-bold text-ink">{item.label}</span></button> : <Link key={item.label} href={item.href} className="flex items-center gap-2 rounded-[13px] bg-surface-2 p-2.5"><Status done={item.done} /><span className="text-[11px] font-bold text-ink">{item.label}</span></Link>)}</div>
       <input ref={fileRef} type="file" accept=".ics,text/calendar" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCalendar(file); }} />
       <p className="mt-2 flex items-center gap-1.5 text-[10px] text-ink-faint"><CalendarPlus className="size-3" /> Class import accepts an .ics calendar and merges it with manual entries.</p>
-    </section>
+    </section> : <button onClick={() => void setChecklistHidden(false)} className="press mx-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold text-ink-faint hover:bg-surface-2 hover:text-ink"><Eye className="size-3" /> Show setup checklist</button>}
   </div>;
 }
 
