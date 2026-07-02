@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Plus, Flame, Leaf, Check } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import type { FlatMenuItem } from "@/lib/menu/flattenMenu";
+import type { DietaryAssessment } from "@/lib/dietary/safety";
 
 interface MealCardProps {
   item: FlatMenuItem;
@@ -12,9 +13,10 @@ interface MealCardProps {
   onOpen?: (item: FlatMenuItem) => void;
   isLogging?: boolean;
   className?: string;
+  safety?: DietaryAssessment;
 }
 
-export function MealCard({ item, index = 0, onLog, onOpen, isLogging, className }: MealCardProps) {
+export function MealCard({ item, index = 0, onLog, onOpen, isLogging, className, safety }: MealCardProps) {
   void index;
   const hasNutrition = item.calories > 0 || item.protein_grams > 0;
 
@@ -55,6 +57,7 @@ export function MealCard({ item, index = 0, onLog, onOpen, isLogging, className 
       <span className="relative mb-1.5 w-fit rounded-full bg-surface/70 px-2 py-0.5 text-[10px] font-semibold text-ink-soft backdrop-blur-sm">
         {item.category_name || item.location_name}
       </span>
+      {safety && <span className={`relative mb-1 w-fit rounded-full px-2 py-0.5 text-[9px] font-bold ${safety.status === "safe" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{safety.status === "safe" ? `${safety.evidence} match` : "Dietary status unknown"}</span>}
 
       <p className="relative line-clamp-2 flex-1 text-[13px] font-bold leading-snug text-ink">
         {item.name}

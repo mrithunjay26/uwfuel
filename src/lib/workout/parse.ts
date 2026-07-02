@@ -26,3 +26,36 @@ export function parseAIWorkout(text: string): WorkoutLogExercise[] {
   }
   return out;
 }
+
+export interface AIWorkoutDay {
+  label: string;
+  exercises: WorkoutLogExercise[];
+}
+
+/**
+ * Parse a multi-day AI plan into labeled days. Day headers are markdown
+ * headings ("## Day 1 — Push") or a bold-only line ("**Day 2 — Pull**").
+ */
+export function parseAIWeek(text: string): AIWorkoutDay[] {
+  const days: AIWorkoutDay[] = [];
+  let cur: { label: string; body: string[] } | null = null;
+  const flush = () => {
+    if (cur) {
+      const exercises = parseAIWorkout(cur.body.join("\n"));
+      if (exercises.length) days.push({ label: cur.label, exercises });
+    }
+  };
+  for (const line of text.split("\n")) {
+    const heading = line.match(/^\s*#{1,3}\s*(.+?)\s*$/);
+    const boldHeader = line.match(/^\s*\*\*\s*(day\s*\d+[^*]*)\*\*\s*$/i);
+    const label = heading?.[1] || boldHeader?.[1];
+    if (label && !/\d+\s*[×xX]\s*\d+/.test(line)) {
+      flush();
+      cur = { label: label.replace(/[#*]/g, "").trim(), body: [] };
+    } else if (cur) {
+      cur.body.push(line);
+    }
+  }
+  flush();
+  return days;
+}

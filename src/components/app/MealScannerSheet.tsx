@@ -2,19 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Barcode, Bookmark, Camera, Check, Combine, Flame, Keyboard, Loader2, MapPin, MessageSquarePlus,
+  AlertTriangle, Barcode, Bookmark, Camera, Check, Combine, Flame, Keyboard, Loader2, MapPin, MessageSquarePlus,
   Minus, Plus, RotateCcw, Search, Sparkles, Trash2, X,
 } from "lucide-react";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useCamera } from "@/lib/hooks/useCamera";
 import { useFlatMenu } from "@/lib/hooks/useFlatMenu";
+import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { logFoodItem, saveInventoryFood } from "@/lib/db/userDb";
 import { todayPacificKey } from "@/lib/firebase/dining";
 import { matchCampusItem } from "@/lib/nutrition/campusMatch";
 import { estimateMacros, estimateProteinGrams } from "@/lib/utils/nutrition";
 import { scanImage, scanText, scanBarcode, searchFoods, type ScannedFood } from "@/lib/nutrition/scan";
 import type { FlatMenuItem } from "@/lib/menu/flattenMenu";
+import { assessDietarySafety } from "@/lib/dietary/safety";
 import { haptic } from "@/lib/utils/haptics";
 
 type Mode = "photo" | "barcode" | "search" | "text";
@@ -91,6 +93,7 @@ export function MealScannerSheet({
   const { cohereKey, groqKey } = useConfig();
   const day = dateKey ?? todayPacificKey();
   const { items: menu } = useFlatMenu(open);
+  const { profile: setupProfile } = useOnboardingProfile();
   const { videoRef, status, start, stop, captureFrame } = useCamera();
 
   const [mode, setMode] = useState<Mode>("photo");
@@ -107,6 +110,12 @@ export function MealScannerSheet({
   const [searching, setSearching] = useState(false);
   const [savedIds, setSavedIds] = useState<Record<string, boolean>>({});
   const abortRef = useRef<AbortController | null>(null);
+  const dietaryAssessment = foods.length && setupProfile?.dietary
+    ? assessDietarySafety(
+        { name: foods.map((food) => food.name).join(", "), ingredients },
+        setupProfile.dietary,
+      )
+    : null;
 
   // Run the camera only while actively capturing in a camera mode.
   useEffect(() => {
@@ -120,17 +129,19 @@ export function MealScannerSheet({
   useEffect(() => {
     if (open) return;
     abortRef.current?.abort();
-    setPhase("capture");
-    setFoods([]);
-    setIngredients([]);
-    setError(null);
-    setText("");
-    setNote("");
-    setLastScan(null);
-    setSearchQ("");
-    setSearchResults([]);
-    setSavedIds({});
-    setMode("photo");
+    queueMicrotask(() => {
+      setPhase("capture");
+      setFoods([]);
+      setIngredients([]);
+      setError(null);
+      setText("");
+      setNote("");
+      setLastScan(null);
+      setSearchQ("");
+      setSearchResults([]);
+      setSavedIds({});
+      setMode("photo");
+    });
   }, [open]);
 
   const runAnalyze = useCallback(
@@ -386,6 +397,7 @@ export function MealScannerSheet({
           location_id: f.locationId,
           location_name: f.locationName,
           is_custom: f.isCustom,
+          funding_source: "personal",
         });
       }
       haptic("medium");
@@ -567,6 +579,26 @@ export function MealScannerSheet({
                       <Combine className="size-3.5" /> Combine into one item
                     </button>
                   )}
+                </div>
+              )}
+              {dietaryAssessment?.status === "blocked" && (
+                <div role="alert" className="rounded-[16px] border border-danger/30 bg-danger/10 px-4 py-3">
+                  <p className="flex items-center gap-2 text-[12px] font-bold text-danger">
+                    <AlertTriangle className="size-4 shrink-0" /> Dietary conflict detected
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
+                    {dietaryAssessment.reasons.join(" · ")}. You can still log this meal so your history stays accurate.
+                  </p>
+                </div>
+              )}
+              {dietaryAssessment?.status === "unknown" && (
+                <div role="status" className="rounded-[16px] border border-line bg-surface-2 px-4 py-3">
+                  <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
+                    <AlertTriangle className="size-4 shrink-0 text-ink-faint" /> Dietary status unverified
+                  </p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
+                    Check the ingredients before eating. Logging remains available for accurate tracking.
+                  </p>
                 </div>
               )}
               {lastScan && (

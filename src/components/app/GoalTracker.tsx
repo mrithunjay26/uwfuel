@@ -46,14 +46,16 @@ export function GoalTracker({ assessment: a, months, phase, nutrition }: GoalTra
   const [asking, setAsking] = useState(false);
 
   const styles = STATUS_STYLES[a.status];
-  const weeksLeft = Math.max(0, Math.ceil(a.weeksLeft));
+  const totalDaysLeft = Math.max(0, Math.ceil(a.weeksLeft * 7));
+  const weeksLeft = Math.floor(totalDaysLeft / 7);
+  const daysLeft = totalDaysLeft % 7;
   const targetLabel = a.targetDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const DirIcon = a.direction === "gain" ? TrendingUp : a.direction === "lose" ? TrendingDown : Target;
 
   function goalContext(): string {
     const lines = [
       `Goal: ${a.direction} weight from ${a.startWeight.toFixed(0)} to ${a.goalWeight.toFixed(0)} lbs over ${months} months.`,
-      `Current ${a.currentWeight.toFixed(1)} lbs, ${weeksLeft} weeks left, ${Math.abs(a.remainingLbs).toFixed(1)} lbs to go.`,
+      `Current ${a.currentWeight.toFixed(1)} lbs, ${weeksLeft} weeks and ${daysLeft} days left, ${Math.abs(a.remainingLbs).toFixed(1)} lbs to go.`,
       `Recent pace ${rateLabel(a.actualRate)}; pace needed ${rateLabel(a.requiredRate)}. Training phase: ${phase}. Status: ${a.headline}.`,
     ];
     if (nutrition) {
@@ -129,7 +131,9 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
         <div className="mt-4 flex items-end justify-between">
           <div className="flex items-baseline gap-1.5">
             <span className="font-display text-[30px] font-extrabold leading-none text-ink">{weeksLeft}</span>
-            <span className="text-[12px] font-semibold text-ink-soft">weeks left</span>
+            <span className="text-[12px] font-semibold text-ink-soft">wk</span>
+            <span className="font-display ml-1 text-[22px] font-extrabold leading-none text-ink">{daysLeft}</span>
+            <span className="text-[12px] font-semibold text-ink-soft">days left</span>
           </div>
           <span className="flex items-center gap-1 text-[11px] font-semibold text-ink-faint">
             <CalendarClock className="size-3.5" /> {targetLabel}
@@ -213,7 +217,7 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
               </form>
               {(asking || answer) && (
                 <div className="mt-2 rounded-[12px] bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-ink-soft">
-                  {asking ? "Thinking…" : answer}
+                  {asking ? "Thinking…" : <FormattedAnswer content={answer ?? ""} />}
                 </div>
               )}
             </div>
@@ -222,6 +226,35 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
         )}
       </div>
     </section>
+  );
+}
+
+// Renders AI text with **bold** and "- " bullets, like the chat tab.
+function FormattedAnswer({ content }: { content: string }) {
+  const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
+  return (
+    <div className="flex flex-col gap-1">
+      {lines.map((line, i) => {
+        const bullet = /^[-*•]\s+/.test(line);
+        const text = bullet ? line.replace(/^[-*•]\s+/, "") : line;
+        return bullet ? (
+          <span key={i} className="flex gap-1.5">
+            <span className="mt-1.5 size-1 shrink-0 rounded-full bg-accent" />
+            <span>{boldParts(text)}</span>
+          </span>
+        ) : (
+          <p key={i}>{boldParts(text)}</p>
+        );
+      })}
+    </div>
+  );
+}
+
+function boldParts(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i} className="font-bold text-ink">{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>,
   );
 }
 

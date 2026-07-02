@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Flame, X } from "lucide-react";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useConfig } from "@/lib/config/ConfigContext";
+import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { saveProfile, saveWeight } from "@/lib/db/userDb";
 import { todayPacificKey } from "@/lib/firebase/dining";
 import { weeklyChangeFromGoal, dailyTargetCalories } from "@/lib/utils/nutrition";
@@ -25,6 +26,7 @@ const PHASE_OPTIONS: { value: GoalPhase; label: string; description: string }[] 
 export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalModalProps) {
   const handle = useUserDb();
   const { dailyBudget, setDailyBudget } = useConfig();
+  const { profile: setupProfile } = useOnboardingProfile();
 
   const [currentWeight, setCurrentWeight] = useState(
     initial?.current_weight ? String(initial.current_weight) : "",
@@ -71,12 +73,12 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
     const cw = parseFloat(currentWeight);
     const gw = parseFloat(goalWeight);
     const mo = parseInt(months, 10);
-    const bud = parseFloat(budget);
+    const bud = setupProfile ? dailyBudget : parseFloat(budget);
 
     if (!cw || cw <= 0) return setError("Enter a valid current weight.");
     if (!gw || gw <= 0) return setError("Enter a valid goal weight.");
     if (!mo || mo <= 0) return setError("Enter valid months (1 to 24).");
-    if (!bud || bud <= 0) return setError("Enter a valid daily budget.");
+    if (!setupProfile && (!bud || bud <= 0)) return setError("Enter a valid daily budget.");
 
     setError(null);
     setSaving(true);
@@ -104,7 +106,7 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
 
       await saveWeight(db, uid, today, cw);
 
-      setDailyBudget(bud);
+      if (!setupProfile) setDailyBudget(bud);
 
       onClose();
     } catch (e) {
@@ -145,7 +147,7 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
 
         <div className="mt-4 flex flex-col gap-4">
           <div className="flex gap-3">
-            <label className="block flex-1">
+            {!setupProfile && <label className="block flex-1">
               <span className="mb-1 block text-[12px] font-semibold text-ink-soft">
                 Current (lbs)
               </span>
@@ -159,7 +161,7 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
                 placeholder="135"
                 className="w-full rounded-[12px] border border-line bg-surface-2 px-4 py-3 text-[15px] font-medium text-ink outline-none placeholder:text-ink-faint focus:border-accent"
               />
-            </label>
+            </label>}
             <label className="block flex-1">
               <span className="mb-1 block text-[12px] font-semibold text-ink-soft">
                 Goal (lbs)

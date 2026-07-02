@@ -460,6 +460,21 @@ textarea::placeholder {
   backdrop-filter: none !important;
 }
 
+/* ── Customizer: page / tab transition animations ──────────────────── */
+.page-anim, .tab-panel-anim { animation: none; }
+[data-anim="fade"]    .page-anim { animation: pg-fade 0.18s ease both; }
+[data-anim="slideup"] .page-anim { animation: pg-slideup 0.22s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+[data-anim="slide"]   .page-anim { animation: pg-slide 0.22s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+[data-anim="scale"]   .page-anim { animation: pg-scale 0.19s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+[data-anim="fade"]    .tab-panel-anim { animation: pg-fade 0.16s ease both; }
+[data-anim="slideup"] .tab-panel-anim { animation: pg-slideup 0.2s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+[data-anim="slide"]   .tab-panel-anim { animation: pg-slide 0.2s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+[data-anim="scale"]   .tab-panel-anim { animation: pg-scale 0.17s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+@keyframes pg-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pg-slideup { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+@keyframes pg-slide { from { opacity: 0; transform: translate3d(16px, 0, 0); } to { opacity: 1; transform: none; } }
+@keyframes pg-scale { from { opacity: 0; transform: scale(0.972); } to { opacity: 1; transform: none; } }
+
 /* ── Customizer: calm mode (reduced motion) ────────────────────────── */
 [data-motion="calm"] *,
 [data-motion="calm"] *::before,
@@ -536,6 +551,60 @@ textarea::placeholder {
 .press { transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .press:active { transform: scale(0.96); }
 
+/* Experience customization */
+.customizer-hero {
+  background:
+    radial-gradient(circle at 90% 10%, var(--glow-1), transparent 45%),
+    linear-gradient(135deg, var(--glass-bg-strong), var(--glass-bg-soft));
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+.customizer-group { transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+.customizer-group:focus-within { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); box-shadow: var(--glass-shadow), 0 0 0 3px var(--accent-soft); }
+
+[data-density="compact"] :is(.gap-6) { gap: 1rem !important; }
+[data-density="compact"] :is(.gap-4) { gap: 0.65rem !important; }
+[data-density="compact"] :is(.px-5) { padding-left: 1rem !important; padding-right: 1rem !important; }
+[data-density="compact"] .customizer-group { padding: 0.75rem !important; }
+[data-density="compact"] .glass-panel { --glass-blur: 14px; }
+
+.workout-oled {
+  --bg: #000000;
+  --bg-base: #000000;
+  --surface: #070707;
+  --surface-2: #0d0d0f;
+  --surface-3: #17171a;
+  --ink: #ffffff;
+  --ink-soft: #c8c8cf;
+  --ink-faint: #888892;
+  --line: #222226;
+  --line-strong: #34343a;
+  --glass-bg: rgba(10, 10, 12, 0.94);
+  --glass-bg-strong: rgba(16, 16, 18, 0.97);
+  --glass-bg-soft: rgba(255, 255, 255, 0.035);
+  min-height: 100dvh;
+  background: #000;
+}
+
+[data-workout-focus="on"] .app-navigation,
+[data-workout-focus="on"] .workout-log-header,
+[data-workout-focus="on"] .workout-date-switcher,
+[data-workout-focus="on"] .workout-supporting-card { display: none !important; }
+[data-workout-focus="on"] .workout-log-content { padding-top: max(0.75rem, env(safe-area-inset-top)) !important; padding-bottom: 1rem !important; }
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-float { animation: none !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, white);
+  outline-offset: 3px;
+}
+
+@media (pointer: coarse) {
+  button, a, input, select, textarea { min-height: 44px; }
 }

@@ -8,10 +8,15 @@ import { useConfig } from "@/lib/config/ConfigContext";
 import { useUserDb }  from "@/lib/hooks/useUserDb";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { useFirebaseExercises } from "@/lib/hooks/useFirebaseExercises";
+import { useWorkoutLogs } from "@/lib/hooks/useWorkoutLogs";
 import { callCohere } from "@/lib/ai/cohere";
-import { setActiveWorkoutTemplate } from "@/lib/db/userDb";
-import { parseAIWorkout } from "@/lib/workout/parse";
+import { saveWorkoutPlan, setActiveWorkoutTemplate } from "@/lib/db/userDb";
+import { parseAIWorkout, parseAIWeek, type AIWorkoutDay } from "@/lib/workout/parse";
+import { resolveBodyPart } from "@/lib/workout/bodyParts";
+import type { WorkoutLogExercise } from "@/lib/db/types";
+import { generatedDaysToWeek } from "@/lib/workout/plans";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
+import { WorkoutPlanStudio } from "@/components/app/WorkoutPlanStudio";
 
 export interface Exercise {
   exercise_id: string;
@@ -69,12 +74,65 @@ const EQUIPMENT_COLORS: Record<string, string> = {
   Bodyweight: "bg-surface-2 text-ink-soft",
 };
 
+// Per-day focus keywords for each split — used to build a full week instantly (no AI).
+const SPLIT_DAYS: Record<ProgramTypeId, { label: string; focus: string[] }[]> = {
+  ppl: [
+    { label: "Push", focus: ["chest", "front delt", "side delt", "tricep", "shoulder", "press", "fly", "dip"] },
+    { label: "Pull", focus: ["lat", "upper back", "back", "trap", "bicep", "rear delt", "row", "pull", "curl", "shrug"] },
+    { label: "Legs", focus: ["quad", "hamstring", "glute", "calf", "leg", "squat", "lunge", "hip"] },
+  ],
+  upper_lower: [
+    { label: "Upper", focus: ["chest", "back", "lat", "shoulder", "delt", "bicep", "tricep", "press", "row", "curl"] },
+    { label: "Lower", focus: ["quad", "hamstring", "glute", "calf", "leg", "squat", "lunge", "hip"] },
+  ],
+  full_body: [
+    { label: "Full Body A", focus: ["chest", "back", "quad", "shoulder", "bicep"] },
+    { label: "Full Body B", focus: ["hamstring", "lat", "glute", "tricep", "calf"] },
+    { label: "Full Body C", focus: ["chest", "row", "leg", "shoulder", "core"] },
+  ],
+  bro_split: [
+    { label: "Chest", focus: ["chest", "press", "fly", "dip"] },
+    { label: "Back", focus: ["lat", "back", "row", "pull", "trap", "shrug"] },
+    { label: "Shoulders", focus: ["delt", "shoulder", "raise", "press", "face pull"] },
+    { label: "Legs", focus: ["quad", "hamstring", "glute", "calf", "leg", "squat"] },
+    { label: "Arms", focus: ["bicep", "tricep", "curl", "forearm", "extension"] },
+  ],
+  custom: [{ label: "Full Body", focus: ["chest", "back", "leg", "shoulder", "arm"] }],
+};
+
+// Deterministically pick `count` exercises from the library that match a day's focus.
+function pickForDay(pool: Exercise[], focus: string[], count: number, familiar: Map<string, number>): WorkoutLogExercise[] {
+  const matches = pool.filter((e) => {
+    const hay = `${e.name} ${e.muscle_groups.join(" ")} ${e.category}`.toLowerCase();
+    return focus.some((f) => hay.includes(f));
+  });
+  const shuffled = [...matches].sort((a, b) => {
+    const familiarity = (familiar.get(b.name.toLowerCase()) ?? 0) - (familiar.get(a.name.toLowerCase()) ?? 0);
+    return familiarity || Math.random() - 0.5;
+  });
+  const seen = new Set<string>();
+  const picked: Exercise[] = [];
+  for (const e of shuffled) {
+    const k = e.name.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    picked.push(e);
+    if (picked.length >= count) break;
+  }
+  return picked.map((e) => ({
+    name: e.name,
+    muscle: resolveBodyPart(e.name, e.muscle_groups),
+    sets: Array.from({ length: 3 }, () => ({ weight: 0, reps: 10 })),
+  }));
+}
+
 export default function WorkoutPage() {
   const router = useRouter();
   const { cohereKey, hasCohere } = useConfig();
   const handle = useUserDb();
   const { profile } = useUserProfile();
   const { exercises: fbExercises, loading: fbLoading } = useFirebaseExercises();
+  const { logs } = useWorkoutLogs();
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("All");
@@ -88,6 +146,10 @@ export default function WorkoutPage() {
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [programType, setProgramType] = useState<ProgramTypeId>("ppl");
   const [customProgram, setCustomProgram] = useState("");
+  const [scope, setScope] = useState<"day" | "week">("day");
+  const [aiWeek, setAiWeek] = useState<AIWorkoutDay[] | null>(null);
+  const [sentLabel, setSentLabel] = useState<string | null>(null);
+  const [focusPlanId, setFocusPlanId] = useState<string | null>(null);
 
   const allExercises = useMemo<Exercise[]>(() => {
     const fbConverted: Exercise[] = fbExercises.map((fb, i) => ({
@@ -112,6 +174,32 @@ export default function WorkoutPage() {
 
     return [...fbConverted, ...builtinFiltered];
   }, [fbExercises]);
+
+  const familiarity = useMemo(() => {
+    const counts = new Map<string, number>();
+    logs.forEach((log) => log.exercises.forEach((exercise) => {
+      if (!exercise.sets.length) return;
+      const key = exercise.name.toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }));
+    return counts;
+  }, [logs]);
+
+  const familiarNames = useMemo(() => [...familiarity.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => allExercises.find((exercise) => exercise.name.toLowerCase() === name)?.name ?? name), [familiarity, allExercises]);
+
+  const saveGeneration = useCallback(async (days: AIWorkoutDay[], title: string, source: "ai" | "manual") => {
+    if (!handle || days.length === 0) return null;
+    const id = await saveWorkoutPlan(handle.db, handle.uid, {
+      title,
+      split: programType === "custom" ? customProgram.trim() || "Custom split" : PROGRAM_TYPES.find((item) => item.id === programType)?.desc || "Custom split",
+      source,
+      days: generatedDaysToWeek(days),
+    });
+    setFocusPlanId(id);
+    return id;
+  }, [handle, programType, customProgram]);
 
   const filtered = useMemo(() => {
     let list = allExercises;
@@ -156,7 +244,11 @@ export default function WorkoutPage() {
         ? (customProgram.trim() || "full-body session")
         : `${typeMeta?.label} (${typeMeta?.desc})`;
 
-      const pool = allExercises.length ? [...allExercises].sort(() => Math.random() - 0.5).slice(0, 70) : [];
+      const familiarSet = new Set(familiarNames.map((name) => name.toLowerCase()));
+      const pool = allExercises.length ? [...allExercises].sort((a, b) => {
+        const known = Number(familiarSet.has(b.name.toLowerCase())) - Number(familiarSet.has(a.name.toLowerCase()));
+        return known || Math.random() - 0.5;
+      }).slice(0, 70) : [];
       const exerciseMenu = pool.map((e) => e.name).join(", ");
 
       const prompt = `Create ONE structured gym workout session for a UW college student.
@@ -171,18 +263,88 @@ ${exerciseMenu}
 **[Exercise Name]** — [Sets] × [Reps] — [one short, specific form/technique cue]
 
 Rules:
+- Prefer exercises the student has already logged: ${familiarNames.slice(0, 30).join(", ") || "No history yet"}.
+- Only introduce a new machine when the familiar exercises cannot train the required movement safely.
 - Use real exercise names (ideally from the list above) and vary the movement patterns.
 - The cue after the last "—" MUST be a single helpful sentence the lifter can learn from.
 - After the list, add one short "Why this session?" line.`;
 
       const reply = await callCohere(cohereKey, prompt, { temperature: 0.8 });
       setAiPlan(reply);
+      const exercises = parseAIWorkout(reply);
+      if (exercises.length) await saveGeneration([{ label: `${typeMeta?.label ?? "Custom"} Workout`, exercises }], `${typeMeta?.label ?? "Custom"} Workout`, "ai");
     } catch (e) {
       setAiError(e instanceof Error ? e.message : "Generation failed.");
     } finally {
       setGenerating(false);
     }
-  }, [cohereKey, generating, profile, programType, customProgram, allExercises]);
+  }, [cohereKey, generating, profile, programType, customProgram, allExercises, familiarNames, saveGeneration]);
+
+  const generateWeek = useCallback(async () => {
+    if (!cohereKey || generating) return;
+    setGenerating(true);
+    setAiWeek(null);
+    setAiError(null);
+    setAiMsg(null);
+    try {
+      const phase = profile?.phase ?? "maintain";
+      const weight = profile?.current_weight ?? 160;
+      const typeMeta = PROGRAM_TYPES.find((p) => p.id === programType);
+      const focus = programType === "custom"
+        ? (customProgram.trim() || "balanced full-body week")
+        : `${typeMeta?.label} (${typeMeta?.desc})`;
+      const familiarSet = new Set(familiarNames.map((name) => name.toLowerCase()));
+      const pool = allExercises.length ? [...allExercises].sort((a, b) => {
+        const known = Number(familiarSet.has(b.name.toLowerCase())) - Number(familiarSet.has(a.name.toLowerCase()));
+        return known || Math.random() - 0.5;
+      }).slice(0, 90) : [];
+      const menu = pool.map((e) => e.name).join(", ");
+
+      const prompt = `Create a full WEEKLY workout split for a UW college student.
+
+Split: ${focus}
+Student: ${weight} lbs, ${phase} phase, full gym, ~45–60 min per session.
+${menu ? `Prefer these REAL exercises where they fit: ${menu}\n` : ""}
+Exercises already used by this lifter (prioritize these machines and movement patterns): ${familiarNames.slice(0, 40).join(", ") || "No history yet"}.
+Output each training day EXACTLY like this (no rest days in the output):
+## Day [N] — [Focus]
+**[Exercise]** — [Sets] × [Reps] — [one short form cue]
+(5–6 exercises per day, real names, varied movement patterns)`;
+
+      const reply = await callCohere(cohereKey, prompt, { temperature: 0.8 });
+      const days = parseAIWeek(reply);
+      if (days.length === 0) { setAiError("Couldn't read a week from that. Try again."); return; }
+      setAiWeek(days);
+      await saveGeneration(days, `${typeMeta?.label ?? "Custom"} weekly plan`, "ai");
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "Generation failed.");
+    } finally {
+      setGenerating(false);
+    }
+  }, [cohereKey, generating, profile, programType, customProgram, allExercises, familiarNames, saveGeneration]);
+
+  const buildManualWeek = useCallback(async () => {
+    const template = SPLIT_DAYS[programType] ?? SPLIT_DAYS.full_body;
+    const days = template
+      .map((d) => ({ label: d.label, exercises: pickForDay(allExercises, d.focus, 5, familiarity) }))
+      .filter((d) => d.exercises.length > 0);
+    setAiWeek(days.length ? days : null);
+    setAiPlan(null);
+    setAiError(days.length ? null : "No exercises available to build a split yet.");
+    setAiMsg(null);
+    if (days.length) await saveGeneration(days, `${PROGRAM_TYPES.find((item) => item.id === programType)?.label ?? "Custom"} weekly plan`, "manual").catch(() => {});
+  }, [programType, allExercises, familiarity, saveGeneration]);
+
+  const sendDayToLog = useCallback(async (day: AIWorkoutDay) => {
+    if (!handle) { setAiMsg("Sign in to send workouts to your log."); return; }
+    try {
+      await setActiveWorkoutTemplate(handle.db, handle.uid, { title: day.label, exercises: day.exercises });
+      setSentLabel(day.label);
+      setTimeout(() => setSentLabel(null), 2500);
+    } catch {
+      setAiMsg("Couldn't send. Check your connection.");
+    }
+  }, [handle]);
 
   const exportToLogger = useCallback(async () => {
     if (!handle || !aiPlan) return;
@@ -238,10 +400,24 @@ Rules:
             <p className="font-display text-[16px] font-bold text-ink">AI Workout Generator</p>
           </div>
           <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
-            Pick a focus and generate a session, then send it straight to your Workout Logger to fill in weights.
+            Generate a single day or a whole week, then send any day straight to your Workout Logger to fill in weights.
           </p>
 
-          <div className="no-scrollbar -mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1">
+          <div className="mt-4 flex gap-1 rounded-[14px] bg-surface-2 p-1">
+            {([["day", "Single day"], ["week", "Full week"]] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setScope(v)}
+                className={`flex-1 rounded-[10px] py-2 text-[12px] font-bold transition ${
+                  scope === v ? "bg-accent text-accent-contrast" : "text-ink-soft"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="no-scrollbar -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
             {PROGRAM_TYPES.map((p) => (
               <button
                 key={p.id}
@@ -267,23 +443,35 @@ Rules:
           )}
 
           <button
-            onClick={generateWorkout}
+            onClick={scope === "week" ? generateWeek : generateWorkout}
             disabled={generating || !hasCohere || (programType === "custom" && !customProgram.trim())}
             className="press mt-5 flex w-full items-center justify-center gap-2 rounded-[14px] bg-accent py-3.5 text-[14px] font-bold text-accent-contrast disabled:opacity-50"
           >
             {generating
               ? <><RefreshCw className="size-4 animate-spin" /> Generating…</>
-              : <><Sparkles className="size-4" /> {aiPlan ? "Regenerate workout" : "Generate workout"}</>}
+              : <><Sparkles className="size-4" /> {scope === "week" ? (aiWeek ? "Regenerate week" : "Generate week (AI)") : aiPlan ? "Regenerate workout" : "Generate workout (AI)"}</>}
           </button>
 
-          {!hasCohere && (
+          {scope === "week" && (
+            <button
+              onClick={buildManualWeek}
+              className="press mt-2 flex w-full items-center justify-center gap-2 rounded-[14px] border border-line bg-surface-2 py-3 text-[13px] font-bold text-ink"
+            >
+              <Dumbbell className="size-4" /> Build instantly — no AI
+            </button>
+          )}
+
+          {!hasCohere && scope !== "week" && (
             <button onClick={() => router.push("/profile")} className="mt-2 w-full text-center text-[11px] font-semibold text-accent-ink">
               Add your Cohere key in Profile to use AI →
             </button>
           )}
+          {!hasCohere && scope === "week" && (
+            <p className="mt-2 text-center text-[11px] text-ink-faint">No AI key needed for “Build instantly”. Add a Cohere key for AI weeks.</p>
+          )}
           {aiError && <p className="mt-2 text-[12px] text-danger">{aiError}</p>}
 
-          {aiPlan && (
+          {scope === "day" && aiPlan && (
             <div className="mt-5 rounded-[16px] border border-line bg-surface-2 p-4">
               <div className="text-[13px] leading-relaxed text-ink-soft">
                 {aiPlan.split("\n").map((line, i) => {
@@ -302,7 +490,40 @@ Rules:
               {aiMsg && <p className="mt-2 text-center text-[11px] font-semibold text-success">{aiMsg}</p>}
             </div>
           )}
+
+          {scope === "week" && aiWeek && (
+            <div className="mt-5 flex flex-col gap-2.5">
+              <p className="text-[11px] font-semibold text-ink-faint">
+                {aiWeek.length}-day split · tap <b className="text-ink">Send to log</b> on the day you&apos;re training.
+              </p>
+              {aiWeek.map((day, di) => (
+                <div key={di} className="rounded-[16px] border border-line bg-surface-2 p-3.5">
+                  <div className="flex items-center justify-between">
+                    <p className="font-display text-[14px] font-extrabold text-ink">{day.label}</p>
+                    <span className="text-[11px] text-ink-faint">{day.exercises.length} exercises</span>
+                  </div>
+                  <div className="mt-2 flex flex-col gap-0.5">
+                    {day.exercises.map((ex, xi) => (
+                      <p key={xi} className="flex items-center justify-between text-[12px] text-ink-soft">
+                        <span className="truncate">{ex.name}</span>
+                        <span className="shrink-0 text-ink-faint">{ex.sets.length} × {ex.sets[0]?.reps ?? 10}</span>
+                      </p>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => sendDayToLog(day)}
+                    className="press mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-[12px] bg-accent-soft py-2 text-[12px] font-bold text-accent-ink"
+                  >
+                    {sentLabel === day.label ? <><ClipboardList className="size-3.5" /> Sent ✓ — open Log</> : <><ClipboardList className="size-3.5" /> Send to log</>}
+                  </button>
+                </div>
+              ))}
+              {aiMsg && <p className="text-center text-[11px] font-semibold text-danger">{aiMsg}</p>}
+            </div>
+          )}
         </section>
+
+        <WorkoutPlanStudio focusPlanId={focusPlanId} exerciseNames={Array.from(new Set([...familiarNames, ...allExercises.map((exercise) => exercise.name)]))} />
 
         <div className="no-scrollbar -mx-5 mb-4 flex gap-2 overflow-x-auto px-5">
           {CATEGORIES.map((cat) => (

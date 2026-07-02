@@ -12,7 +12,7 @@ export function useActiveWorkoutTemplate(): { template: ActiveWorkoutTemplate | 
 
   useEffect(() => {
     if (!handle) { setTemplate(null); return; }
-    const unsub = onValue(ref(handle.db, PATHS.activeWorkout(handle.uid)), (snap) => {
+    const unsub = onValue(ref(handle.db, PATHS.workoutTemplates(handle.uid)), (snap) => {
       const v = snap.val();
       setTemplate(v && Array.isArray(v.exercises) ? (v as ActiveWorkoutTemplate) : null);
     });

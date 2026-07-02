@@ -5,6 +5,15 @@ export type FabShape = "circle" | "squircle" | "square";
 export type FontChoice = "default" | "system" | "serif" | "mono";
 export type CornerStyle = "default" | "round" | "soft" | "sharp";
 export type PanelStyle = "default" | "solid" | "bordered" | "minimal";
+export type PageAnim = "none" | "fade" | "slideup" | "slide" | "scale";
+export type Density = "compact" | "comfortable";
+export type HapticLevel = "off" | "light" | "medium" | "strong";
+export type HapticDuration = "short" | "normal" | "long";
+export type NavPosition = "bottom" | "top";
+export type NavMode = "tabs" | "fab";
+export type Handedness = "left" | "right";
+export type QuickAction = "plan" | "workout" | "log" | "chat";
+export type WorkoutCardMode = "notebook" | "focus";
 export type ShapeMotif =
   | "none" | "blobs" | "leaves" | "dumbbells" | "koalas" | "huskies"
   | "hearts" | "stars" | "coffee" | "paws" | "music" | "books"
@@ -23,11 +32,24 @@ export interface Customize {
   highContrast: boolean; // boost text + panel contrast for accessibility
   corners: CornerStyle;  // global corner roundness for surfaces & inputs
   panel: PanelStyle;     // glass / solid / bordered surface treatment
+  pageAnim: PageAnim;    // tab/page transition animation
   reduceMotion: boolean; // calm mode — disable animations & transitions
   navSize: NavSize;
   navLabels: boolean;
   fabShape: FabShape;
   font: FontChoice;
+  density: Density;
+  hapticLevel: HapticLevel;
+  hapticDuration: HapticDuration;
+  navPosition: NavPosition;
+  navMode: NavMode;
+  handedness: Handedness;
+  primaryAction: QuickAction;
+  secondaryAction: QuickAction;
+  workoutCardMode: WorkoutCardMode;
+  autoFocusMode: boolean;
+  workoutOled: boolean;
+  restAlerts: boolean;
 }
 
 export const DEFAULT_ACCENT = "#6c5cf2";
@@ -45,11 +67,24 @@ export const DEFAULT_CUSTOMIZE: Customize = {
   highContrast: false,
   corners: "default",
   panel: "default",
+  pageAnim: "slideup",
   reduceMotion: false,
   navSize: "default",
   navLabels: true,
   fabShape: "squircle",
   font: "default",
+  density: "comfortable",
+  hapticLevel: "light",
+  hapticDuration: "normal",
+  navPosition: "bottom",
+  navMode: "fab",
+  handedness: "right",
+  primaryAction: "plan",
+  secondaryAction: "log",
+  workoutCardMode: "notebook",
+  autoFocusMode: true,
+  workoutOled: false,
+  restAlerts: true,
 };
 
 /** Calming, theme-adaptive gradient presets (translucent over --bg-base). */
@@ -253,8 +288,13 @@ export function computeCustomize(c: Customize): ComputedCustomize {
     "data-contrast": c.highContrast ? "high" : "off",
     "data-corners": c.corners,
     "data-panel": c.panel,
+    "data-anim": c.pageAnim,
     "data-motion": c.reduceMotion ? "calm" : "full",
     "data-font": c.font,
+    "data-density": c.density,
+    "data-haptic": c.hapticLevel,
+    "data-haptic-duration": c.hapticDuration,
+    "data-workout-oled": c.workoutOled ? "on" : "off",
   };
 
   return { vars, attrs };
@@ -282,10 +322,23 @@ export function parseCustomize(raw: unknown): Customize {
     highContrast: typeof v.highContrast === "boolean" ? v.highContrast : DEFAULT_CUSTOMIZE.highContrast,
     corners: (["default", "round", "soft", "sharp"] as CornerStyle[]).includes(v.corners as CornerStyle) ? (v.corners as CornerStyle) : DEFAULT_CUSTOMIZE.corners,
     panel: (["default", "solid", "bordered", "minimal"] as PanelStyle[]).includes(v.panel as PanelStyle) ? (v.panel as PanelStyle) : DEFAULT_CUSTOMIZE.panel,
+    pageAnim: (["none", "fade", "slideup", "slide", "scale"] as PageAnim[]).includes(v.pageAnim as PageAnim) ? (v.pageAnim as PageAnim) : DEFAULT_CUSTOMIZE.pageAnim,
     reduceMotion: typeof v.reduceMotion === "boolean" ? v.reduceMotion : DEFAULT_CUSTOMIZE.reduceMotion,
     navSize: (["compact", "default", "large"] as NavSize[]).includes(v.navSize as NavSize) ? (v.navSize as NavSize) : DEFAULT_CUSTOMIZE.navSize,
     navLabels: typeof v.navLabels === "boolean" ? v.navLabels : DEFAULT_CUSTOMIZE.navLabels,
     fabShape: (["circle", "squircle", "square"] as FabShape[]).includes(v.fabShape as FabShape) ? (v.fabShape as FabShape) : DEFAULT_CUSTOMIZE.fabShape,
     font: (["default", "system", "serif", "mono"] as FontChoice[]).includes(v.font as FontChoice) ? (v.font as FontChoice) : DEFAULT_CUSTOMIZE.font,
+    density: (["compact", "comfortable"] as Density[]).includes(v.density as Density) ? (v.density as Density) : DEFAULT_CUSTOMIZE.density,
+    hapticLevel: (["off", "light", "medium", "strong"] as HapticLevel[]).includes(v.hapticLevel as HapticLevel) ? (v.hapticLevel as HapticLevel) : DEFAULT_CUSTOMIZE.hapticLevel,
+    hapticDuration: (["short", "normal", "long"] as HapticDuration[]).includes(v.hapticDuration as HapticDuration) ? (v.hapticDuration as HapticDuration) : DEFAULT_CUSTOMIZE.hapticDuration,
+    navPosition: (["bottom", "top"] as NavPosition[]).includes(v.navPosition as NavPosition) ? (v.navPosition as NavPosition) : DEFAULT_CUSTOMIZE.navPosition,
+    navMode: (["tabs", "fab"] as NavMode[]).includes(v.navMode as NavMode) ? (v.navMode as NavMode) : DEFAULT_CUSTOMIZE.navMode,
+    handedness: (["left", "right"] as Handedness[]).includes(v.handedness as Handedness) ? (v.handedness as Handedness) : DEFAULT_CUSTOMIZE.handedness,
+    primaryAction: (["plan", "workout", "log", "chat"] as QuickAction[]).includes(v.primaryAction as QuickAction) ? (v.primaryAction as QuickAction) : DEFAULT_CUSTOMIZE.primaryAction,
+    secondaryAction: (["plan", "workout", "log", "chat"] as QuickAction[]).includes(v.secondaryAction as QuickAction) ? (v.secondaryAction as QuickAction) : DEFAULT_CUSTOMIZE.secondaryAction,
+    workoutCardMode: (["notebook", "focus"] as WorkoutCardMode[]).includes(v.workoutCardMode as WorkoutCardMode) ? (v.workoutCardMode as WorkoutCardMode) : DEFAULT_CUSTOMIZE.workoutCardMode,
+    autoFocusMode: typeof v.autoFocusMode === "boolean" ? v.autoFocusMode : DEFAULT_CUSTOMIZE.autoFocusMode,
+    workoutOled: typeof v.workoutOled === "boolean" ? v.workoutOled : DEFAULT_CUSTOMIZE.workoutOled,
+    restAlerts: typeof v.restAlerts === "boolean" ? v.restAlerts : DEFAULT_CUSTOMIZE.restAlerts,
   };
 }

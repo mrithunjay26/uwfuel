@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Contrast, Image as ImageIcon, Moon, MoonStar, Paintbrush, RotateCcw, Sun, X } from "lucide-react";
+import { Activity, BellRing, Check, Contrast, Gauge, Hand, Image as ImageIcon, LayoutGrid, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { useTheme } from "@/lib/theme/ThemeContext";
 import {
@@ -16,8 +16,17 @@ import {
   type FabShape,
   type FontChoice,
   type GlowLevel,
+  type Handedness,
+  type HapticDuration,
+  type HapticLevel,
+  type Density,
+  type NavMode,
+  type NavPosition,
   type NavSize,
+  type PageAnim,
   type PanelStyle,
+  type QuickAction,
+  type WorkoutCardMode,
 } from "@/lib/customize/types";
 import { haptic } from "@/lib/utils/haptics";
 
@@ -64,6 +73,25 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
 
         <div className="thin-scrollbar flex flex-col gap-6 overflow-y-auto px-5 py-5">
 
+          <section className="customizer-hero relative overflow-hidden rounded-[22px] border border-accent/20 p-4">
+            <div className="relative z-10 flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-[14px] bg-accent text-accent-contrast shadow-[var(--shadow-fab)]"><Sparkles className="size-5" /></span>
+              <div>
+                <p className="font-display text-[15px] font-extrabold text-ink">Make Fuel move like you do</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">Tune the whole experience, then let workout mode simplify itself when the gym gets loud.</p>
+              </div>
+            </div>
+            <div className="relative z-10 mt-3 grid grid-cols-3 gap-2">
+              {[
+                { label: "Bubbly", patch: { density: "comfortable", panel: "default", pageAnim: "slideup", reduceMotion: false } },
+                { label: "Focused", patch: { density: "compact", workoutCardMode: "focus", workoutOled: true, pageAnim: "fade" } },
+                { label: "Calm", patch: { density: "comfortable", glow: "low", reduceMotion: true, hapticLevel: "off" } },
+              ].map((preset) => (
+                <button key={preset.label} onClick={() => { setCustomize(preset.patch as never); haptic("light"); }} className="press rounded-[12px] border border-white/20 bg-white/10 px-2 py-2 text-[11px] font-bold text-ink backdrop-blur-md">{preset.label}</button>
+              ))}
+            </div>
+          </section>
+
           {/* Appearance */}
           <Group title="Appearance" hint="Light or dark base.">
             <div className="flex gap-2">
@@ -98,6 +126,44 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
               on={customize.autoNight}
               onToggle={() => setCustomize({ autoNight: !customize.autoNight })}
             />
+          </Group>
+
+          <Group title="Feel & feedback" hint="Control information density, touch feedback, and pacing.">
+            <div className="flex items-center gap-2"><Gauge className="size-4 text-accent" /><Label>Screen density</Label></div>
+            <Chips<Density>
+              value={customize.density}
+              onChange={(density) => setCustomize({ density })}
+              options={[{ v: "compact", label: "Compact" }, { v: "comfortable", label: "Comfortable" }]}
+            />
+            <div className="mt-4 flex items-center gap-2"><Zap className="size-4 text-accent" /><Label>Haptic intensity</Label></div>
+            <Chips<HapticLevel>
+              value={customize.hapticLevel}
+              onChange={(hapticLevel) => setCustomize({ hapticLevel })}
+              options={[{ v: "off", label: "Off" }, { v: "light", label: "Light" }, { v: "medium", label: "Medium" }, { v: "strong", label: "Strong" }]}
+            />
+            {customize.hapticLevel !== "off" && <div className="mt-3"><Label>Pulse duration</Label><Chips<HapticDuration>
+              value={customize.hapticDuration}
+              onChange={(hapticDuration) => setCustomize({ hapticDuration })}
+              options={[{ v: "short", label: "Short" }, { v: "normal", label: "Normal" }, { v: "long", label: "Long" }]}
+            /></div>}
+          </Group>
+
+          <Group title="Navigation & reach" hint="Put controls where your thumb naturally lands.">
+            <div className="flex items-center gap-2"><Navigation className="size-4 text-accent" /><Label>Menu position</Label></div>
+            <Chips<NavPosition> value={customize.navPosition} onChange={(navPosition) => setCustomize({ navPosition })} options={[{ v: "bottom", label: "Bottom" }, { v: "top", label: "Top" }]} />
+            <div className="mt-3"><Label>Navigation style</Label><Chips<NavMode> value={customize.navMode} onChange={(navMode) => setCustomize({ navMode })} options={[{ v: "fab", label: "Floating action" }, { v: "tabs", label: "Tab bar" }]} /></div>
+            <div className="mt-3 flex items-center gap-2"><Hand className="size-4 text-accent" /><Label>One-handed reach</Label></div>
+            <Chips<Handedness> value={customize.handedness} onChange={(handedness) => setCustomize({ handedness })} options={[{ v: "left", label: "Left hand" }, { v: "right", label: "Right hand" }]} />
+            <div className="mt-3"><Label>Primary shortcut</Label><Chips<QuickAction> value={customize.primaryAction} onChange={(primaryAction) => setCustomize({ primaryAction })} options={[{ v: "plan", label: "Plan" }, { v: "workout", label: "Train" }, { v: "log", label: "Log" }, { v: "chat", label: "Chat" }]} /></div>
+            <div className="mt-3"><Label>Reach shortcut</Label><Chips<QuickAction> value={customize.secondaryAction} onChange={(secondaryAction) => setCustomize({ secondaryAction })} options={[{ v: "log", label: "Log" }, { v: "workout", label: "Train" }, { v: "plan", label: "Plan" }, { v: "chat", label: "Chat" }]} /></div>
+          </Group>
+
+          <Group title="Workout cockpit" hint="Context-aware controls for sets, rest, and harsh gym lighting.">
+            <div className="flex items-center gap-2"><LayoutGrid className="size-4 text-accent" /><Label>Active workout cards</Label></div>
+            <Chips<WorkoutCardMode> value={customize.workoutCardMode} onChange={(workoutCardMode) => setCustomize({ workoutCardMode })} options={[{ v: "notebook", label: "Data-dense notebook" }, { v: "focus", label: "Minimal focus" }]} />
+            <Toggle className="mt-3" label="Automatic focus mode" hint="When an exercise opens, hide everything except set tracking." icon={<Activity className="size-4 text-accent" />} on={customize.autoFocusMode} onToggle={() => setCustomize({ autoFocusMode: !customize.autoFocusMode })} />
+            <Toggle className="mt-3" label="OLED weight-room mode" hint="Use true black behind the workout logger for maximum contrast." icon={<Moon className="size-4 text-accent" />} on={customize.workoutOled} onToggle={() => setCustomize({ workoutOled: !customize.workoutOled })} />
+            <Toggle className="mt-3" label="Rest-finished buzz" hint="Alert when a set break ends, using your chosen haptic strength." icon={<BellRing className="size-4 text-accent" />} on={customize.restAlerts} onToggle={() => setCustomize({ restAlerts: !customize.restAlerts })} />
           </Group>
 
           {/* Accent */}
@@ -304,6 +370,20 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
                 ]}
               />
             </div>
+            <div className="mt-3">
+              <Label>Tab transition</Label>
+              <Chips<PageAnim>
+                value={customize.pageAnim}
+                onChange={(v) => setCustomize({ pageAnim: v })}
+                options={[
+                  { v: "slideup", label: "Slide up" },
+                  { v: "slide", label: "Slide" },
+                  { v: "fade", label: "Fade" },
+                  { v: "scale", label: "Scale" },
+                  { v: "none", label: "None" },
+                ]}
+              />
+            </div>
             <Toggle
               className="mt-3"
               label="Calm mode"
@@ -375,7 +455,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
 
 function Group({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
-    <section>
+    <section className="customizer-group rounded-[18px] border border-line bg-surface/70 p-4 shadow-[var(--shadow-sm)] backdrop-blur-[var(--glass-blur)]">
       <h3 className="font-display text-[14px] font-extrabold text-ink">{title}</h3>
       {hint && <p className="mb-2.5 mt-0.5 text-[11px] text-ink-soft">{hint}</p>}
       <div className={hint ? "" : "mt-2.5"}>{children}</div>

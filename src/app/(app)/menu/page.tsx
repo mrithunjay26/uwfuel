@@ -32,6 +32,8 @@ import { estimateProteinGrams, estimateMacros } from "@/lib/utils/nutrition";
 import { DiningMap } from "@/components/app/DiningMap";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { MealDetailSheet } from "@/components/app/MealDetailSheet";
+import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
+import { assessDietarySafety, type DietaryAssessment } from "@/lib/dietary/safety";
 
 type PageTab = "menu" | "map";
 
@@ -52,6 +54,7 @@ export default function MenuPage() {
   const { totals } = useFoodLog(today);
   const searchParams = useSearchParams();
   const { position: userGeo } = useGeolocation();
+  const { profile: setupProfile } = useOnboardingProfile();
 
   const [pageTab, setPageTab] = useState<PageTab>(
     searchParams.get("tab") === "map" ? "map" : "menu",
@@ -120,10 +123,12 @@ export default function MenuPage() {
     [locations],
   );
 
-  const allItems = useMemo(
+  const rawItems = useMemo(
     () => flattenFullMenu(menuSnapshot, locationNames, locationOpenById),
     [menuSnapshot, locationNames, locationOpenById],
   );
+  const safetyByKey = useMemo(() => new Map(rawItems.map((item) => [item.unique_key, assessDietarySafety(item, setupProfile?.dietary ?? null)])), [rawItems, setupProfile]);
+  const allItems = useMemo(() => rawItems.filter((item) => safetyByKey.get(item.unique_key)?.status !== "blocked"), [rawItems, safetyByKey]);
 
   const locationIdByGroup = useMemo(() => {
     const map: Record<string, string> = {};
@@ -206,6 +211,7 @@ export default function MenuPage() {
           location_id:   item.location_id,
           location_name: item.location_name,
           is_custom:     false,
+          funding_source: "dining_plan",
         });
         showToast(`${item.name} logged ✓`);
       } catch {
@@ -309,6 +315,8 @@ export default function MenuPage() {
           onOpen={setDetailItem}
           loggingId={loggingId}
           totalItems={allItems.length}
+          hiddenUnsafe={rawItems.length - allItems.length}
+          safetyByKey={safetyByKey}
         />
       ) : (
         <MapTabContent
@@ -345,6 +353,8 @@ function MenuTabContent({
   onOpen,
   loggingId,
   totalItems,
+  hiddenUnsafe,
+  safetyByKey,
 }: {
   locationGroups:  ReturnType<typeof buildLocationGroups>;
   selectedGroup:   string | null;
@@ -359,6 +369,8 @@ function MenuTabContent({
   onOpen:          (item: FlatMenuItem) => void;
   loggingId:       string | null;
   totalItems:      number;
+  hiddenUnsafe:    number;
+  safetyByKey:     Map<string, DietaryAssessment>;
 }) {
   return (
     <div className="flex-1 px-5 pb-6 pt-4">
@@ -401,7 +413,7 @@ function MenuTabContent({
 
       {!loading && !error && totalItems > 0 && (
         <p className="mt-3 text-[12px] text-ink-faint">
-          {items.length} of {totalItems} items
+          {items.length} of {totalItems} items{hiddenUnsafe > 0 ? ` · ${hiddenUnsafe} blocked by your food rules` : ""}
         </p>
       )}
 
@@ -437,6 +449,7 @@ function MenuTabContent({
                 onLog={onLog}
                 onOpen={onOpen}
                 isLogging={loggingId === item.unique_key}
+                safety={safetyByKey.get(item.unique_key)}
               />
             ))}
           </div>

@@ -20,6 +20,7 @@ import {
   Sparkles,
   Sun,
   Upload,
+  WalletCards,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -89,6 +90,12 @@ export default function ProfilePage() {
       />
 
       <div className="flex flex-col gap-3 px-5 pt-5">
+
+        <Link href="/setup" className="press glass-panel flex items-center gap-3 rounded-[20px] p-4">
+          <span className="grid size-10 place-items-center rounded-[14px] bg-accent-soft text-accent"><WalletCards className="size-5" /></span>
+          <span className="min-w-0 flex-1"><span className="block font-display text-[15px] font-bold text-ink">Everyday setup &amp; food wallets</span><span className="block text-[11px] text-ink-soft">Dining Plan, personal budget, cooking access, and food rules</span></span>
+          <ChevronRight className="size-4 text-ink-faint" />
+        </Link>
 
         <section className="glass-panel rounded-[20px] p-4">
           <div className="flex items-center gap-2">

@@ -10,11 +10,13 @@ import { LoggedFoodSheet } from "@/components/app/LoggedFoodSheet";
 import { MealScannerSheet } from "@/components/app/MealScannerSheet";
 import { FoodInventorySheet } from "@/components/app/FoodInventorySheet";
 import { MealCalendarSheet } from "@/components/app/MealCalendarSheet";
+import { EverydayOverview } from "@/components/app/EverydayOverview";
 import { SCAN_ENABLED } from "@/lib/nutrition/scan";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useFoodLog, type FoodLogItem } from "@/lib/hooks/useFoodLog";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
+import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { useWeightLog } from "@/lib/hooks/useWeightLog";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { deleteLogEntry, logFoodItem, updateLogEntry, saveInventoryFood } from "@/lib/db/userDb";
@@ -42,6 +44,7 @@ export default function DashboardPage() {
   const handle = useUserDb();
   const { dailyBudget, hasCohere } = useConfig();
   const { profile, loading: profileLoading } = useUserProfile();
+  const { profile: setupProfile } = useOnboardingProfile();
   const today = todayPacificKey();
   const [selectedDate, setSelectedDate] = useState(today);
   const { entries, totals, loading: logLoading } = useFoodLog(selectedDate);
@@ -56,6 +59,9 @@ export default function DashboardPage() {
       ),
     [profile, weightPoints, latestWeight],
   );
+  const goalDaysLeft = Math.max(0, Math.ceil((goalAssessment?.weeksLeft ?? 0) * 7));
+  const goalWeeksLeft = Math.floor(goalDaysLeft / 7);
+  const goalRemainderDays = goalDaysLeft % 7;
 
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [foodDetail, setFoodDetail] = useState<FoodLogItem | null>(null);
@@ -284,7 +290,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="glass-strong mt-3 rounded-[18px] px-4 py-3">
+        {!setupProfile && <div className="glass-strong mt-3 rounded-[18px] px-4 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[13px] font-bold text-ink">💵 Dining budget</span>
             {isLoading ? (
@@ -303,10 +309,11 @@ export default function DashboardPage() {
               style={{ width: `${budgetProgress * 100}%` }}
             />
           </div>
-        </div>
+        </div>}
       </div>
 
       <div className="px-5 pt-5 pb-6">
+        <EverydayOverview today={today} />
         {SCAN_ENABLED && (
           <button
             onClick={() => setScanOpen(true)}
@@ -390,7 +397,7 @@ export default function DashboardPage() {
             </span>
             <div className="flex-1">
               <p className="text-[13px] font-bold text-ink">
-                {Math.max(0, Math.ceil(goalAssessment.weeksLeft))} weeks to your {goalAssessment.goalWeight} lb goal
+                {goalWeeksLeft} wk {goalRemainderDays} days to your {goalAssessment.goalWeight} lb goal
               </p>
               <p className="text-[11px] text-ink-soft">
                 {goalAssessment.headline} · {Math.abs(goalAssessment.remainingLbs).toFixed(1)} lbs to go

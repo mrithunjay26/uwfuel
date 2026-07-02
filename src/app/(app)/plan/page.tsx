@@ -32,6 +32,10 @@ import { useConfig }       from "@/lib/config/ConfigContext";
 import { useUserDb }       from "@/lib/hooks/useUserDb";
 import { useUserProfile }  from "@/lib/hooks/useUserProfile";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
+import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
+import { useFoodExpenses } from "@/lib/hooks/useFoodExpenses";
+import { filterSafeCandidates } from "@/lib/dietary/safety";
+import { computeBudgetSnapshot } from "@/lib/budget/compute";
 import { useActivePlan }   from "@/lib/hooks/useActivePlan";
 import { usePlanRepo }     from "@/lib/hooks/usePlanRepo";
 import {
@@ -229,6 +233,8 @@ export default function PlanPage() {
   const handle                  = useUserDb();
   const { profile }             = useUserProfile();
   const { todayStops }          = useClassSchedule();
+  const { profile: setupProfile } = useOnboardingProfile();
+  const { expenses } = useFoodExpenses();
   const { activePlan }          = useActivePlan();
   const today                   = todayPacificKey();
   const { plans: savedPlans, loading: plansLoading } = usePlanRepo(today);
@@ -238,7 +244,8 @@ export default function PlanPage() {
     refresh: refreshGeo,
   } = useGeolocation(false);
 
-  const budget = dailyBudget;
+  const setupBudget = useMemo(() => computeBudgetSnapshot(setupProfile, expenses, today), [setupProfile, expenses, today]);
+  const budget = setupProfile ? Math.max(3, setupBudget.combinedTodayGuide) : dailyBudget;
 
   const [planTab,      setPlanTab]      = useState<PlanTab>("ai");
   const [mealCount,    setMealCount]    = useState<MealCount>(3);
@@ -262,6 +269,7 @@ export default function PlanPage() {
 
   const [locations,  setLocations]  = useState<DiningLocationsSnapshot | null>(null);
   const [menuItems,  setMenuItems]  = useState<FlatMenuItem[]>([]);
+  const eligibleMenuItems = useMemo(() => filterSafeCandidates(menuItems, setupProfile?.dietary ?? null), [menuItems, setupProfile]);
 
   useEffect(() => {
     let gone = false;
@@ -288,7 +296,7 @@ export default function PlanPage() {
   const targetKcal = dailyTargetCalories(weight, weeklyRate);
 
   const nearbyPick = useMemo<NearbyPick | null>(() => {
-    if (!userGeo || !locations || menuItems.length === 0) return null;
+    if (!userGeo || !locations || eligibleMenuItems.length === 0) return null;
 
     const candidates = buildLocationGroups(locations)
       .filter((g) => g.isOpen)
@@ -303,7 +311,7 @@ export default function PlanPage() {
       .sort((a, b) => a.dist - b.dist);
 
     for (const cand of candidates.slice(0, 8)) {
-      const pool = menuItems.filter(
+      const pool = eligibleMenuItems.filter(
         (i) =>
           cand.stationIds.has(i.location_id) &&
           i.available_now &&
@@ -326,7 +334,7 @@ export default function PlanPage() {
       }
     }
     return null;
-  }, [userGeo, locations, menuItems, phase, budget, maxWalkMin, nearbyDiet]);
+  }, [userGeo, locations, eligibleMenuItems, phase, budget, maxWalkMin, nearbyDiet]);
 
   useEffect(() => { setLoggedPick(false); }, [nearbyPick?.item.unique_key]);
 
@@ -348,6 +356,7 @@ export default function PlanPage() {
       location_id:   item.location_id,
       location_name: item.location_name,
       is_custom:     false,
+      funding_source: "dining_plan",
     });
     setLoggedPick(true);
   }
@@ -368,6 +377,7 @@ export default function PlanPage() {
         location_id:   meal.location_id,
         location_name: meal.location_name,
         is_custom:     false,
+        funding_source: "dining_plan",
       });
     },
     [handle, today],
@@ -503,7 +513,7 @@ export default function PlanPage() {
   const [manualSort,     setManualSort]     = useState<"price" | "protein" | "calories">("price");
 
   const manualResults = useMemo(() => {
-    let list = menuItems.filter((i) => !i.is_beverage);
+    let list = eligibleMenuItems.filter((i) => !i.is_beverage);
     const q = searchQ.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -522,7 +532,7 @@ export default function PlanPage() {
       return b.calories - a.calories;
     });
     return list.slice(0, 60);
-  }, [menuItems, searchQ, manualFilter, manualSort]);
+  }, [eligibleMenuItems, searchQ, manualFilter, manualSort]);
 
   function addFromMenu(item: FlatMenuItem) {
     const protein = item.protein_grams > 0
@@ -610,7 +620,7 @@ export default function PlanPage() {
   const buildPrompt = useCallback(() => {
     const budgetStr   = budget.toFixed(2);
 
-    const candidates = menuItems
+    const candidates = eligibleMenuItems
       .filter((i) => i.available_now && i.price > 0 && i.price <= budget && isSubstantialFood(i))
       .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget))
       .slice(0, 150);
@@ -676,10 +686,65 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
       { role: "system" as const, content: system },
       { role: "user"   as const, content: user   },
     ];
-  }, [budget, mealCount, menuItems, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest]);
+  }, [budget, mealCount, eligibleMenuItems, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest]);
+
+  async function handleSmartPlan() {
+    if (!handle) return;
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const ranked = eligibleMenuItems
+        .filter((item) => item.available_now && item.price > 0 && item.price <= budget && isSubstantialFood(item))
+        .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget));
+      const picked: FlatMenuItem[] = [];
+      let spent = 0;
+      for (const item of ranked) {
+        if (picked.some((current) => current.name === item.name) || spent + item.price > budget) continue;
+        picked.push(item);
+        spent += item.price;
+        if (picked.length >= mealCount) break;
+      }
+      if (!picked.length) throw new Error("No open, dietary-safe menu items fit the current budget.");
+      const meals: PlanMeal[] = picked.map((item, index) => {
+        const mealType = MEAL_TYPES[Math.min(index, MEAL_TYPES.length - 1)];
+        return {
+          meal_type: mealType,
+          item_name: item.name,
+          location_id: item.location_id,
+          location_name: item.location_name,
+          estimated_calories: item.calories,
+          estimated_protein: item.protein_grams,
+          estimated_cost: item.price,
+          suggested_time: defaultTimeFor(mealType),
+          reasoning: "Best available match for your budget, food rules, and nutrition goal.",
+        };
+      });
+      const daily_totals = meals.reduce((totals, meal) => ({
+        calories: totals.calories + meal.estimated_calories,
+        protein: totals.protein + meal.estimated_protein,
+        cost: totals.cost + meal.estimated_cost,
+      }), { calories: 0, protein: 0, cost: 0 });
+      const plan: MealPlan = {
+        source: "manual",
+        title: "Smart campus plan",
+        summary: "Built without AI from open, budget-safe, dietary-compatible UW menu items.",
+        meals,
+        daily_totals,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const planId = await savePlanToRepo(handle.db, handle.uid, today, plan);
+      await setActivePlan(handle.db, handle.uid, { plan_id: planId, source: "manual", title: plan.title, date: today, daily_totals, meals });
+    } catch (cause) {
+      setGenError(cause instanceof Error ? cause.message : "Could not build a plan.");
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   async function handleGenerate() {
-    if (!handle || !cohereKey) return;
+    if (!handle) return;
+    if (!cohereKey) { await handleSmartPlan(); return; }
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -709,12 +774,12 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
 
       const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       const byName = new Map<string, FlatMenuItem>();
-      menuItems.forEach((i) => { const k = norm(i.name); if (k && !byName.has(k)) byName.set(k, i); });
+      eligibleMenuItems.forEach((i) => { const k = norm(i.name); if (k && !byName.has(k)) byName.set(k, i); });
       const matchItem = (name: string): FlatMenuItem | null => {
         const k = norm(name || "");
         if (!k) return null;
         if (byName.has(k)) return byName.get(k)!;
-        return menuItems.find((i) => { const n = norm(i.name); return n && (n.includes(k) || k.includes(n)); }) || null;
+        return eligibleMenuItems.find((i) => { const n = norm(i.name); return n && (n.includes(k) || k.includes(n)); }) || null;
       };
 
       let meals: PlanMeal[] = rawMeals.flatMap((m, i): PlanMeal[] => {
@@ -1299,9 +1364,9 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
 
             {!hasCohere && (
               <div className="rounded-[16px] bg-peach-soft/70 px-4 py-3 backdrop-blur-md">
-                <p className="text-[13px] font-bold text-ink">Add a Cohere AI key to generate plans</p>
+                <p className="text-[13px] font-bold text-ink">Smart planning works without an AI key</p>
                 <p className="mt-0.5 text-[12px] text-ink-soft">
-                  Go to Profile → AI key. Your key is only stored on this device.
+                  We rank real, open UW items using your food rules, budget, and goal. AI is optional refinement.
                 </p>
               </div>
             )}
@@ -1316,7 +1381,7 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
 
             <button
               onClick={handleGenerate}
-              disabled={generating || !hasCohere || !handle}
+              disabled={generating || !handle}
               className="press flex w-full items-center justify-center gap-2 rounded-[18px] bg-accent py-4 text-[15px] font-bold text-accent-contrast shadow-[var(--shadow-md)] disabled:opacity-50"
             >
               {generating ? (
@@ -1327,7 +1392,7 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
               ) : (
                 <>
                   <Sparkles className="size-4" />
-                  {activePlan ? "Regenerate plan" : `Generate ${mealCount}-meal plan`}
+                  {activePlan ? "Regenerate plan" : `${hasCohere ? "Generate" : "Build"} ${mealCount}-meal plan`}
                 </>
               )}
             </button>

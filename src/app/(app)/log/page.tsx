@@ -31,10 +31,15 @@ import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useWorkoutLogs } from "@/lib/hooks/useWorkoutLogs";
 import { useFirebaseExercises } from "@/lib/hooks/useFirebaseExercises";
 import { useActiveWorkoutTemplate } from "@/lib/hooks/useActiveWorkoutTemplate";
-import { logWorkout, updateWorkoutLog, deleteWorkoutLog, clearActiveWorkoutTemplate } from "@/lib/db/userDb";
+import { useActiveWorkoutPlan } from "@/lib/hooks/useActiveWorkoutPlan";
+import { useWorkoutScheduleOverrides } from "@/lib/hooks/useWorkoutScheduleOverrides";
+import { useCustomize } from "@/lib/customize/CustomizeContext";
+import { logWorkout, updateWorkoutLog, deleteWorkoutLog, clearActiveWorkoutTemplate, saveWorkoutScheduleOverride } from "@/lib/db/userDb";
 import { todayPacificKey } from "@/lib/firebase/dining";
-import { bodyPartFromName, BODY_PARTS } from "@/lib/workout/bodyParts";
-import type { ExerciseType, LoggedSet, WorkoutLogExercise, WorkoutLogItem } from "@/lib/db/types";
+import { bodyPartFromName, resolveBodyPart, colorForBodyPart, BODY_PART_COLORS, BODY_PARTS } from "@/lib/workout/bodyParts";
+import { loggerExercisesFromPlan, workoutDayForDate } from "@/lib/workout/plans";
+import { haptic } from "@/lib/utils/haptics";
+import type { ExerciseType, LoggedSet, WorkoutLogExercise, WorkoutLogItem, WorkoutPlanDay } from "@/lib/db/types";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -65,6 +70,40 @@ function bigNum(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000
 // Epley estimated one-rep max — lets us detect rep PRs (more reps at a given weight), not just heaviest lifts.
 const e1rm = (w: number, r: number) => (w > 0 && r > 0 ? w * (1 + r / 30) : 0);
 
+// Lightweight fuzzy matcher: exact substrings score highest, then subsequence
+// matches with word-start & streak bonuses. Returns -1 when there's no match.
+function fuzzyScore(query: string, target: string): number {
+  const q = query.toLowerCase().trim();
+  const t = target.toLowerCase();
+  if (!q) return 0;
+  const at = t.indexOf(q);
+  if (at !== -1) return 200 - at * 2; // substring: earlier = better
+  let qi = 0, score = 0, streak = 0, prev = -2;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      streak = prev === ti - 1 ? streak + 1 : 1;
+      const wordStart = ti === 0 || t[ti - 1] === " ";
+      score += streak + (wordStart ? 4 : 1);
+      prev = ti;
+      qi++;
+    }
+  }
+  return qi === q.length ? score : -1;
+}
+
+function relDaysLabel(from: string, to: string): string {
+  const a = Date.parse(`${from}T00:00:00`);
+  const b = Date.parse(`${to}T00:00:00`);
+  if (isNaN(a) || isNaN(b)) return "";
+  const d = Math.round((b - a) / 86400000);
+  if (d <= 0) return "today";
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d}d ago`;
+  if (d < 31) return `${Math.round(d / 7)}w ago`;
+  if (d < 365) return `${Math.round(d / 30)}mo ago`;
+  return `${Math.round(d / 365)}y ago`;
+}
+
 type Tab = "today" | "calendar" | "records" | "charts";
 
 export default function WorkoutLogPage() {
@@ -72,11 +111,22 @@ export default function WorkoutLogPage() {
   const { logs, loading: logsLoading } = useWorkoutLogs();
   const { exercises: fbExercises } = useFirebaseExercises();
   const { template } = useActiveWorkoutTemplate();
+  const activePlan = useActiveWorkoutPlan();
+  const scheduleOverrides = useWorkoutScheduleOverrides();
   const today = todayPacificKey();
 
   const [tab, setTab] = useState<Tab>("today");
   const [selectedDate, setSelectedDate] = useState(today);
   const [focusExercise, setFocusExercise] = useState<string | null>(null);
+  const [recordsExercise, setRecordsExercise] = useState<string | null>(null);
+  const scheduledDay = useMemo(() => {
+    const incoming = Object.values(scheduleOverrides).find((item) => item.action === "move" && item.moved_to === selectedDate && item.day);
+    if (incoming?.day) return incoming.day;
+    const exact = scheduleOverrides[selectedDate];
+    if (exact?.action === "replace" && exact.day) return exact.day;
+    if (exact?.action === "skip" || exact?.action === "move") return { weekday: workoutDayForDate(activePlan?.days ?? [], selectedDate)?.weekday ?? "monday", label: "Rest", is_rest: true, exercises: [] } as WorkoutPlanDay;
+    return activePlan ? workoutDayForDate(activePlan.days, selectedDate) : null;
+  }, [activePlan, selectedDate, scheduleOverrides]);
 
   const logsByDate = useMemo(() => {
     const map: Record<string, WorkoutLogItem[]> = {};
@@ -93,13 +143,17 @@ export default function WorkoutLogPage() {
 
   const muscleByName = useMemo(() => {
     const map: Record<string, string> = {};
-    fbExercises.forEach((e) => { const n = norm(e.name); if (n) map[n] = e.body_part || e.muscle_group; });
+    fbExercises.forEach((e) => {
+      const n = norm(e.name);
+      // Prefer the DB's specific muscle_group, then body_part, then infer from the name.
+      if (n) map[n] = resolveBodyPart(e.name, [e.muscle_group, e.body_part]);
+    });
     return map;
   }, [fbExercises]);
 
   return (
     <div className="min-h-screen">
-      <AuroraHeader
+      <div className="workout-log-header"><AuroraHeader
         title="Workout Log"
         subtitle={`${logs.length} workout${logs.length === 1 ? "" : "s"} tracked`}
         icon={<ClipboardList className="size-[18px]" />}
@@ -123,9 +177,9 @@ export default function WorkoutLogPage() {
             </button>
           ))}
         </div>
-      </AuroraHeader>
+      </AuroraHeader></div>
 
-      <div className="px-5 pb-8 pt-4">
+      <div key={tab} className="workout-log-content tab-panel-anim px-5 pb-8 pt-4">
         {tab === "today" && (
           <TodayTab
             key={selectedDate}
@@ -137,9 +191,17 @@ export default function WorkoutLogPage() {
             muscleByName={muscleByName}
             today={today}
             template={template}
+            scheduledDay={scheduledDay}
+            scheduleTitle={activePlan?.title ?? null}
+            onMoveScheduled={async (day) => {
+              if (!handle) return;
+              await saveWorkoutScheduleOverride(handle.db, handle.uid, selectedDate, { action: "move", moved_to: shiftDate(selectedDate, 1), day });
+              setSelectedDate(shiftDate(selectedDate, 1));
+            }}
             focusExercise={focusExercise}
             onConsumeFocus={() => setFocusExercise(null)}
             onChangeDate={setSelectedDate}
+            onViewRecords={(name) => { setRecordsExercise(name); setTab("records"); }}
           />
         )}
         {tab === "calendar" && (
@@ -154,7 +216,7 @@ export default function WorkoutLogPage() {
             onDelete={async (id) => { if (handle) await deleteWorkoutLog(handle.db, handle.uid, id).catch(() => {}); }}
           />
         )}
-        {tab === "records" && <RecordsTab logs={logs} directory={directory} />}
+        {tab === "records" && <RecordsTab logs={logs} directory={directory} focusName={recordsExercise} onConsumeFocus={() => setRecordsExercise(null)} />}
         {tab === "charts" && <ChartsTab logs={logs} muscleByName={muscleByName} today={today} />}
       </div>
     </div>
@@ -162,7 +224,7 @@ export default function WorkoutLogPage() {
 }
 
 function TodayTab({
-  date, existing, allLogs, loading, directory, muscleByName, today, template, focusExercise, onConsumeFocus, onChangeDate,
+  date, existing, allLogs, loading, directory, muscleByName, today, template, scheduledDay, scheduleTitle, onMoveScheduled, focusExercise, onConsumeFocus, onChangeDate, onViewRecords,
 }: {
   date: string;
   existing?: WorkoutLogItem;
@@ -172,19 +234,33 @@ function TodayTab({
   muscleByName: Record<string, string>;
   today: string;
   template: { title: string; exercises: WorkoutLogExercise[] } | null;
+  scheduledDay: WorkoutPlanDay | null;
+  scheduleTitle: string | null;
+  onMoveScheduled: (day: WorkoutPlanDay) => void;
+  onViewRecords: (name: string) => void;
   focusExercise: string | null;
   onConsumeFocus: () => void;
   onChangeDate: (d: string) => void;
 }) {
   const handle = useUserDb();
+  const { customize } = useCustomize();
+  const scheduledSeed = scheduledDay && !scheduledDay.is_rest ? loggerExercisesFromPlan(scheduledDay) : [];
   const [logId, setLogId] = useState<string | null>(existing?.id ?? null);
-  const [exercises, setExercises] = useState<WorkoutLogExercise[]>(existing ? clone(existing.exercises) : []);
+  const [exercises, setExercises] = useState<WorkoutLogExercise[]>(existing ? clone(existing.exercises) : scheduledSeed);
   const [openEx, setOpenEx] = useState<number | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [customMuscle, setCustomMuscle] = useState<string | null>(null);
   const [customType, setCustomType] = useState<ExerciseType>("weighted");
   const entryRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const focusActive = customize.workoutCardMode === "focus" && customize.autoFocusMode && openEx !== null;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (focusActive) root.setAttribute("data-workout-focus", "on");
+    else root.removeAttribute("data-workout-focus");
+    return () => root.removeAttribute("data-workout-focus");
+  }, [focusActive]);
 
   // The workout logs load asynchronously, so on the first open of a day `existing`
   // is often undefined and the tab seeds empty. Adopt the saved log once it
@@ -196,10 +272,10 @@ function TodayTab({
       return;
     }
     if (logId === null && exercises.length === 0) {
-      setExercises([]);
+      setExercises(scheduledDay && !scheduledDay.is_rest ? loggerExercisesFromPlan(scheduledDay) : []);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, existing?.id]);
+  }, [date, existing?.id, scheduledDay?.weekday, scheduledDay?.label]);
 
   // Best prior numbers for an exercise (everything logged before this day, this log excluded).
   function priorStats(name: string) {
@@ -276,7 +352,7 @@ function TodayTab({
         if (flagged.length === 0) { await deleteWorkoutLog(handle.db, handle.uid, logId); setLogId(null); }
         else await updateWorkoutLog(handle.db, handle.uid, logId, { exercises: flagged });
       } else if (flagged.length > 0) {
-        const id = await logWorkout(handle.db, handle.uid, { date, title: "Workout", exercises: flagged, source: "manual" });
+        const id = await logWorkout(handle.db, handle.uid, { date, title: scheduledDay?.label || "Workout", exercises: flagged, source: scheduledDay ? "library" : "manual" });
         setLogId(id);
       }
     } catch {}
@@ -315,10 +391,56 @@ function TodayTab({
     persist([...exercises, ...template.exercises.map((e) => ({ name: e.name, ...(e.tip ? { tip: e.tip } : {}), sets: [] as LoggedSet[] }))]);
   }
 
-  const filteredDir = useMemo(() => {
-    const q = pickerSearch.trim().toLowerCase();
-    return (q ? directory.filter((n) => n.toLowerCase().includes(q)) : directory).slice(0, 40);
-  }, [directory, pickerSearch]);
+  function resetToSchedule() {
+    if (!scheduledDay || scheduledDay.is_rest) return;
+    setLogId(existing?.id ?? null);
+    setExercises(loggerExercisesFromPlan(scheduledDay));
+    setOpenEx(null);
+  }
+
+  // How often / how recently each exercise has been done (across all logs).
+  const exerciseStats = useMemo(() => {
+    const m = new Map<string, { name: string; count: number; lastDate: string }>();
+    for (const l of allLogs) {
+      for (const ex of l.exercises) {
+        if (!ex.sets?.length) continue;
+        const k = norm(ex.name);
+        const cur = m.get(k);
+        if (!cur) m.set(k, { name: ex.name, count: 1, lastDate: l.date });
+        else { cur.count += 1; if (l.date > cur.lastDate) cur.lastDate = l.date; }
+      }
+    }
+    return m;
+  }, [allLogs]);
+
+  // Search matrix: previously-done exercises rank first (with recency + count),
+  // fuzzy-matched so half-remembered names still surface.
+  const pickerResults = useMemo(() => {
+    const names = new Map<string, string>();
+    directory.forEach((n) => names.set(norm(n), n));
+    exerciseStats.forEach((s, k) => { if (!names.has(k)) names.set(k, s.name); });
+    const list = [...names.entries()].map(([k, name]) => {
+      const st = exerciseStats.get(k);
+      return { name, count: st?.count ?? 0, lastDate: st?.lastDate ?? null };
+    });
+    const q = pickerSearch.trim();
+    if (!q) {
+      return list
+        .sort((a, b) => {
+          if (a.lastDate && b.lastDate) return b.lastDate.localeCompare(a.lastDate);
+          if (a.lastDate) return -1;
+          if (b.lastDate) return 1;
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, 60);
+    }
+    return list
+      .map((e) => ({ e, raw: fuzzyScore(q, e.name) }))
+      .filter((x) => x.raw >= 0)
+      .sort((a, b) => (b.raw + (b.e.lastDate ? 60 : 0)) - (a.raw + (a.e.lastDate ? 60 : 0)))
+      .slice(0, 40)
+      .map((x) => x.e);
+  }, [directory, exerciseStats, pickerSearch]);
 
   const isNewName = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
@@ -329,17 +451,30 @@ function TodayTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="glass-panel flex items-center justify-between rounded-[16px] px-2 py-2">
+      {focusActive && <button onClick={() => setOpenEx(null)} className="press sticky top-2 z-20 mx-auto flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-[12px] font-bold text-accent-contrast shadow-[var(--shadow-fab)]"><X className="size-3.5" /> Exit focus</button>}
+
+      <div className="workout-date-switcher glass-panel flex items-center justify-between rounded-[16px] px-2 py-2">
         <button onClick={() => onChangeDate(shiftDate(date, -1))} className="press grid size-9 place-items-center rounded-full text-ink-soft"><ChevronLeft className="size-5" /></button>
         <div className="text-center">
           <p className="font-display text-[15px] font-extrabold text-ink">{date === today ? "Today" : prettyDate(date, { weekday: "short", month: "short", day: "numeric" })}</p>
           {totalVolume > 0 && <p className="text-[11px] text-ink-soft">{totalVolume.toLocaleString()} lb volume</p>}
         </div>
-        <button onClick={() => onChangeDate(shiftDate(date, 1))} disabled={date >= today} className="press grid size-9 place-items-center rounded-full text-ink-soft disabled:opacity-30"><ChevronRight className="size-5" /></button>
+        <button onClick={() => onChangeDate(shiftDate(date, 1))} className="press grid size-9 place-items-center rounded-full text-ink-soft"><ChevronRight className="size-5" /></button>
       </div>
 
+      {scheduledDay && (
+        <div className={`workout-supporting-card flex items-center gap-3 rounded-[16px] border px-4 py-3 ${scheduledDay.is_rest ? "border-line bg-surface-2/70" : "border-accent/25 bg-accent-soft/50"}`}>
+          <Calendar className={`size-4 shrink-0 ${scheduledDay.is_rest ? "text-ink-faint" : "text-accent"}`} />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-bold text-ink">{scheduledDay.is_rest ? "Rest & recover" : scheduledDay.label}</p>
+            <p className="truncate text-[11px] text-ink-soft">{scheduleTitle} · {scheduledDay.is_rest ? "No workout scheduled" : `${scheduledDay.exercises.length} exercises prefilled`}</p>
+          </div>
+          {!scheduledDay.is_rest && <span className="flex shrink-0 gap-1"><button onClick={() => onMoveScheduled(scheduledDay)} className="press rounded-full bg-surface px-2.5 py-1.5 text-[10px] font-bold text-ink-soft">Tomorrow</button><button onClick={resetToSchedule} className="press rounded-full bg-accent px-2.5 py-1.5 text-[10px] font-bold text-accent-contrast">Reset</button></span>}
+        </div>
+      )}
+
       {template && (
-        <div className="flex items-center gap-3 rounded-[16px] border border-accent/25 bg-accent-soft/50 px-4 py-3">
+        <div className="workout-supporting-card flex items-center gap-3 rounded-[16px] border border-accent/25 bg-accent-soft/50 px-4 py-3">
           <Sparkles className="size-4 shrink-0 text-accent" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-bold text-ink">{template.title}</p>
@@ -350,19 +485,22 @@ function TodayTab({
         </div>
       )}
 
-      {exercises.map((ex, i) => (
+      {exercises.map((ex, i) => (focusActive && openEx !== i ? null : (
         <div key={i} ref={(el) => { entryRefs.current[i] = el; }}>
           <ExerciseEntry
             exercise={ex}
             priorMax={priorMax(ex.name)}
             prevSets={prevSetsFor(ex.name)}
             open={openEx === i}
-            onToggle={() => setOpenEx(openEx === i ? null : i)}
+            onToggle={() => { if (openEx !== i) haptic("medium"); setOpenEx(openEx === i ? null : i); }}
             onRemove={() => removeExercise(i)}
             onSets={(sets) => setSets(i, sets)}
+            onViewRecords={() => onViewRecords(ex.name)}
+            dense={customize.workoutCardMode === "notebook"}
+            restAlerts={customize.restAlerts}
           />
         </div>
-      ))}
+      )))}
 
       {showPicker ? (
         <section className="glass-panel rounded-[18px] p-3.5">
@@ -371,10 +509,29 @@ function TodayTab({
             <input autoFocus value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} placeholder="Search or name a new exercise…"
               className="w-full rounded-[10px] border border-line bg-surface-2 py-2 pl-8 pr-3 text-[13px] text-ink outline-none focus:border-accent" />
           </div>
-          <div className="thin-scrollbar mt-2 flex max-h-60 flex-col gap-1 overflow-y-auto">
-            {filteredDir.map((n) => (
-              <button key={n} onClick={() => addExercise(n)} className="flex items-center justify-between rounded-[8px] px-2.5 py-1.5 text-left text-[13px] text-ink hover:bg-surface-2">
-                <span className="truncate">{n}</span><Plus className="size-3.5 shrink-0 text-accent" />
+          {!pickerSearch.trim() && pickerResults.some((r) => r.lastDate) && (
+            <p className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+              <History className="size-3" /> Recent &amp; frequent
+            </p>
+          )}
+          <div className="thin-scrollbar mt-1.5 flex max-h-64 flex-col gap-1 overflow-y-auto">
+            {pickerResults.map((r) => (
+              <button
+                key={r.name}
+                onClick={() => addExercise(r.name, muscleByName[norm(r.name)])}
+                className="flex items-center gap-2 rounded-[8px] px-2.5 py-2 text-left hover:bg-surface-2"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-semibold text-ink">{r.name}</span>
+                  {r.lastDate ? (
+                    <span className="flex items-center gap-1.5 text-[10px] text-ink-faint">
+                      <History className="size-2.5" /> {relDaysLabel(r.lastDate, today)} · {r.count}×
+                    </span>
+                  ) : (
+                    muscleByName[norm(r.name)] && <span className="text-[10px] text-ink-faint">{muscleByName[norm(r.name)]}</span>
+                  )}
+                </span>
+                <Plus className="size-3.5 shrink-0 text-accent" />
               </button>
             ))}
           </div>
@@ -465,7 +622,7 @@ function fmtSet(s: LoggedSet, type: ExerciseType): string {
 }
 
 function ExerciseEntry({
-  exercise, priorMax, prevSets, open, onToggle, onRemove, onSets,
+  exercise, priorMax, prevSets, open, onToggle, onRemove, onSets, onViewRecords, dense, restAlerts,
 }: {
   exercise: WorkoutLogExercise;
   priorMax: number;
@@ -474,6 +631,9 @@ function ExerciseEntry({
   onToggle: () => void;
   onRemove: () => void;
   onSets: (sets: LoggedSet[]) => void;
+  onViewRecords: () => void;
+  dense: boolean;
+  restAlerts: boolean;
 }) {
   const type: ExerciseType = exercise.type ?? "weighted";
   const seed = (exercise.sets ?? [])[(exercise.sets ?? []).length - 1] ?? prevSets[prevSets.length - 1];
@@ -485,14 +645,18 @@ function ExerciseEntry({
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [showTip, setShowTip] = useState(false);
   const [rest, setRest] = useState<number | null>(null);
+  const expanded = dense || open;
 
   // Rest countdown between sets.
   useEffect(() => {
     if (rest == null) return;
-    if (rest <= 0) { setRest(null); return; }
-    const id = window.setTimeout(() => setRest((r) => (r == null ? null : r - 1)), 1000);
+    const id = window.setTimeout(() => setRest((current) => {
+      if (current == null) return null;
+      if (current <= 1) { if (restAlerts) haptic("heavy"); return null; }
+      return current - 1;
+    }), 1000);
     return () => window.clearTimeout(id);
-  }, [rest]);
+  }, [rest, restAlerts]);
 
   function buildSet(): LoggedSet | null {
     const c = comment.trim();
@@ -519,6 +683,7 @@ function ExerciseEntry({
     } else {
       onSets([...exercise.sets, set]);
       setRest(REST_DEFAULT); // FitNotes-style rest timer after each new set
+      haptic("medium");
     }
     setComment("");
   }
@@ -547,10 +712,10 @@ function ExerciseEntry({
           </span>
           <span className="text-[11px] text-ink-soft">{summary}</span>
         </span>
-        {open ? <ChevronUp className="size-4 text-ink-faint" /> : <ChevronDown className="size-4 text-ink-faint" />}
+        {!dense && (open ? <ChevronUp className="size-4 text-ink-faint" /> : <ChevronDown className="size-4 text-ink-faint" />)}
       </button>
 
-      {!open && setCount > 0 && (
+      {!expanded && setCount > 0 && (
         <div className="flex flex-wrap gap-1.5 px-4 pb-3">
           {exercise.sets.map((s, i) => (
             <span key={i} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${s.is_pr ? "bg-warning/15 text-warning" : "bg-surface-2 text-ink-soft"}`}>
@@ -560,7 +725,7 @@ function ExerciseEntry({
         </div>
       )}
 
-      {open && (
+      {expanded && (
         <div className="border-t border-line px-4 pb-4 pt-3">
           {exercise.tip && (
             <div className="mb-2.5">
@@ -585,7 +750,14 @@ function ExerciseEntry({
               </div>
             </div>
           )}
-          {priorMax > 0 && type !== "cardio" && <p className="mb-2 text-[11px] text-ink-faint">Best so far: {priorMax} lb</p>}
+          <div className="mb-2 flex items-center justify-between">
+            {priorMax > 0 && type !== "cardio"
+              ? <p className="text-[11px] text-ink-faint">Best so far: {priorMax} lb</p>
+              : <span />}
+            <button onClick={onViewRecords} className="press flex items-center gap-1 text-[11px] font-bold text-accent-ink">
+              <Trophy className="size-3" /> View records
+            </button>
+          </div>
 
           {type === "cardio" ? (
             <div className="grid grid-cols-2 gap-2.5">
@@ -817,9 +989,20 @@ function CalendarTab({
   );
 }
 
-function RecordsTab({ logs, directory }: { logs: WorkoutLogItem[]; directory: string[] }) {
+function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
+  logs: WorkoutLogItem[];
+  directory: string[];
+  focusName?: string | null;
+  onConsumeFocus?: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+
+  // Open a specific exercise's records when navigated from the logger.
+  useEffect(() => {
+    if (focusName) { setSelected(focusName); onConsumeFocus?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusName]);
 
   const loggedNames = useMemo(() => {
     const set = new Set<string>();
@@ -1012,7 +1195,7 @@ function ChartsTab({ logs, muscleByName, today }: { logs: WorkoutLogItem[]; musc
       vol[cat] = (vol[cat] || 0) + exVolume(ex);
     }));
     return Object.entries(vol).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1])
-      .map(([label, value], i) => ({ label, value, color: CHART_COLORS[i % CHART_COLORS.length] }));
+      .map(([label, value], i) => ({ label, value, color: colorForBodyPart(label) === BODY_PART_COLORS.Other ? CHART_COLORS[i % CHART_COLORS.length] : colorForBodyPart(label) }));
   }, [logs, cutoff, muscleByName]);
 
   const total = segments.reduce((s, x) => s + x.value, 0);

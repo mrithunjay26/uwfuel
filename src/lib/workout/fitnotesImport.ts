@@ -1,19 +1,5 @@
 import type { LoggedSet, WorkoutLog, WorkoutLogExercise, ExerciseType } from "@/lib/db/types";
-
-// Maps a FitNotes "Category" to one of the app's muscle groups.
-function toMuscle(category: string): string {
-  const c = category.trim().toLowerCase();
-  if (!c) return "Other";
-  if (c.includes("chest")) return "Chest";
-  if (c.includes("back") || c.includes("lat")) return "Back";
-  if (c.includes("shoulder") || c.includes("delt") || c.includes("trap")) return "Shoulders";
-  if (c.includes("bicep") || c.includes("tricep") || c.includes("forearm") || c.includes("arm")) return "Arms";
-  if (c.includes("glute")) return "Glutes";
-  if (c.includes("quad") || c.includes("hamstring") || c.includes("calf") || c.includes("calves") || c.includes("leg")) return "Legs";
-  if (c.includes("ab") || c.includes("core")) return "Core";
-  if (c.includes("cardio")) return "Cardio";
-  return "Other";
-}
+import { resolveBodyPart } from "@/lib/workout/bodyParts";
 
 /** Parse one CSV line, honoring quoted fields. */
 function splitCsvLine(line: string): string[] {
@@ -126,7 +112,7 @@ export function parseFitNotesCsv(text: string): FitNotesImportResult {
     const key = name.toLowerCase();
     let ex = dayMap.get(key);
     if (!ex) {
-      ex = { name, muscle: toMuscle(idx.category !== -1 ? f[idx.category] : ""), ...(type !== "weighted" ? { type } : {}), sets: [] };
+      ex = { name, muscle: resolveBodyPart(name, idx.category !== -1 ? f[idx.category] : ""), ...(type !== "weighted" ? { type } : {}), sets: [] };
       dayMap.set(key, ex);
     }
     ex.sets.push(set);

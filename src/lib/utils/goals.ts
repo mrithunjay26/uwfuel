@@ -71,11 +71,10 @@ export function computeGoalAssessment(
   const goalWeight = profile.goal_weight;
   const currentWeight = latestWeight ?? sorted[sorted.length - 1]?.weight ?? profile.current_weight;
 
-  const startMs = profile.goal_start_date
-    ? parseDateKey(profile.goal_start_date)
-    : sorted[0]
-      ? parseDateKey(sorted[0].dateKey)
-      : Date.now();
+  // Anchor the countdown to the stored goal start date. Do NOT fall back to the
+  // first weight entry — that can be months in the past and pushes the target
+  // date behind "now", freezing the weeks-left countdown at 0.
+  const startMs = profile.goal_start_date ? parseDateKey(profile.goal_start_date) : Date.now();
   const weeksTotal = profile.months_to_goal * WEEKS_PER_MONTH;
   const targetMs = startMs + weeksTotal * 7 * 86_400_000;
   const now = Date.now();

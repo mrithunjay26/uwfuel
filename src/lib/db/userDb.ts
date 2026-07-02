@@ -10,15 +10,21 @@ import {
 import { PATHS } from "@/lib/db/paths";
 import type {
   ActivePlan,
+  ActiveWorkoutPlan,
   ActiveWorkoutTemplate,
   ClassSchedule,
+  FoodExpense,
   FoodLogEntry,
   InventoryFood,
   MealPlan,
+  OnboardingProfile,
+  ReadinessCheck,
   UserProfile,
   WeightEntry,
   WorkoutLog,
   WorkoutLogExercise,
+  WorkoutPlan,
+  WorkoutScheduleOverride,
 } from "@/lib/db/types";
 
 function nowIso(): string {
@@ -72,6 +78,19 @@ export async function logFoodItem(
   const payload: FoodLogEntry = { ...entry, logged_at: nowIso() };
   const newRef = await push(ref(db, PATHS.dayLogs(uid, dateKey)), payload);
   if (!newRef.key) throw new Error("Firebase push returned no key.");
+  if (payload.price > 0 && payload.funding_source && payload.funding_source !== "unknown") {
+    const category = payload.funding_source === "dining_plan" ? "campus_meal" : "off_campus_meal";
+    const expenseRef = await push(ref(db, PATHS.foodExpenses(uid)), {
+      amount: payload.price,
+      category,
+      funding_source: payload.funding_source,
+      occurred_at: payload.logged_at,
+      date: dateKey,
+      description: payload.name,
+      linked_log_id: newRef.key,
+    } satisfies FoodExpense);
+    if (expenseRef.key) await update(newRef, { expense_id: expenseRef.key });
+  }
   return newRef.key;
 }
 
@@ -81,7 +100,50 @@ export async function deleteLogEntry(
   dateKey: string,
   entryId: string,
 ): Promise<void> {
+  const snap = await get(ref(db, PATHS.logEntry(uid, dateKey, entryId)));
+  const expenseId = snap.exists() ? (snap.val() as FoodLogEntry).expense_id : undefined;
   await remove(ref(db, PATHS.logEntry(uid, dateKey, entryId)));
+  if (expenseId) await remove(ref(db, PATHS.foodExpense(uid, expenseId))).catch(() => {});
+}
+
+export async function saveOnboardingProfile(
+  db: Database,
+  uid: string,
+  profile: Omit<OnboardingProfile, "updated_at">,
+): Promise<void> {
+  await set(ref(db, PATHS.onboardingProfile(uid)), { ...profile, updated_at: nowIso() } satisfies OnboardingProfile);
+}
+
+export async function saveFoodExpense(
+  db: Database,
+  uid: string,
+  expense: Omit<FoodExpense, "occurred_at"> & { occurred_at?: string },
+): Promise<string> {
+  const newRef = await push(ref(db, PATHS.foodExpenses(uid)), { ...expense, occurred_at: expense.occurred_at ?? nowIso() });
+  if (!newRef.key) throw new Error("Failed to create food expense.");
+  return newRef.key;
+}
+
+export async function deleteFoodExpense(db: Database, uid: string, expenseId: string): Promise<void> {
+  await remove(ref(db, PATHS.foodExpense(uid, expenseId)));
+}
+
+export async function saveReadinessCheck(
+  db: Database,
+  uid: string,
+  dateKey: string,
+  check: Omit<ReadinessCheck, "date" | "updated_at">,
+): Promise<void> {
+  await set(ref(db, PATHS.readiness(uid, dateKey)), { ...check, date: dateKey, updated_at: nowIso() } satisfies ReadinessCheck);
+}
+
+export async function saveWorkoutScheduleOverride(
+  db: Database,
+  uid: string,
+  dateKey: string,
+  override: Omit<WorkoutScheduleOverride, "date" | "updated_at">,
+): Promise<void> {
+  await set(ref(db, PATHS.workoutScheduleOverride(uid, dateKey)), { ...override, date: dateKey, updated_at: nowIso() } satisfies WorkoutScheduleOverride);
 }
 
 export async function updateLogEntry(
@@ -91,7 +153,30 @@ export async function updateLogEntry(
   entryId: string,
   patch: Partial<Omit<FoodLogEntry, "logged_at">>,
 ): Promise<void> {
-  await update(ref(db, PATHS.logEntry(uid, dateKey, entryId)), patch);
+  const entryRef = ref(db, PATHS.logEntry(uid, dateKey, entryId));
+  const snap = await get(entryRef);
+  const current = snap.exists() ? snap.val() as FoodLogEntry : null;
+  await update(entryRef, patch);
+  if (!current) return;
+  const next = { ...current, ...patch };
+  if (current.expense_id) {
+    await update(ref(db, PATHS.foodExpense(uid, current.expense_id)), {
+      amount: next.price,
+      funding_source: next.funding_source ?? "unknown",
+      category: next.funding_source === "dining_plan" ? "campus_meal" : "off_campus_meal",
+      description: next.name,
+    });
+  } else if (next.price > 0 && next.funding_source && next.funding_source !== "unknown") {
+    const expenseId = await saveFoodExpense(db, uid, {
+      amount: next.price,
+      category: next.funding_source === "dining_plan" ? "campus_meal" : "off_campus_meal",
+      funding_source: next.funding_source,
+      date: dateKey,
+      description: next.name,
+      linked_log_id: entryId,
+    });
+    await update(entryRef, { expense_id: expenseId });
+  }
 }
 
 export async function clearDayLog(
@@ -99,6 +184,11 @@ export async function clearDayLog(
   uid: string,
   dateKey: string,
 ): Promise<void> {
+  const snap = await get(ref(db, PATHS.dayLogs(uid, dateKey)));
+  if (snap.exists()) {
+    const entries = Object.values(snap.val() as Record<string, FoodLogEntry>);
+    await Promise.all(entries.map((entry) => entry.expense_id ? remove(ref(db, PATHS.foodExpense(uid, entry.expense_id))).catch(() => {}) : Promise.resolve()));
+  }
   await remove(ref(db, PATHS.dayLogs(uid, dateKey)));
 }
 
@@ -115,6 +205,15 @@ export async function saveInventoryFood(
 
 export async function deleteInventoryFood(db: Database, uid: string, id: string): Promise<void> {
   await remove(ref(db, PATHS.inventoryItem(uid, id)));
+}
+
+export async function updateInventoryFood(
+  db: Database,
+  uid: string,
+  id: string,
+  patch: Partial<Omit<InventoryFood, "created_at">>,
+): Promise<void> {
+  await update(ref(db, PATHS.inventoryItem(uid, id)), patch);
 }
 
 export async function savePlanToRepo(
@@ -267,9 +366,51 @@ export async function setActiveWorkoutTemplate(
   template: { title: string; exercises: WorkoutLogExercise[] },
 ): Promise<void> {
   const payload: ActiveWorkoutTemplate = { ...template, created_at: nowIso() };
-  await set(ref(db, PATHS.activeWorkout(uid)), payload);
+  await set(ref(db, PATHS.workoutTemplates(uid)), payload);
 }
 
 export async function clearActiveWorkoutTemplate(db: Database, uid: string): Promise<void> {
+  await remove(ref(db, PATHS.workoutTemplates(uid)));
+}
+
+export async function saveWorkoutPlan(
+  db: Database,
+  uid: string,
+  plan: Omit<WorkoutPlan, "created_at" | "updated_at">,
+): Promise<string> {
+  const now = nowIso();
+  const newRef = await push(ref(db, PATHS.workoutRepo(uid)), {
+    ...plan,
+    created_at: now,
+    updated_at: now,
+  } satisfies WorkoutPlan);
+  if (!newRef.key) throw new Error("Failed to create workout plan.");
+  return newRef.key;
+}
+
+export async function updateWorkoutPlan(
+  db: Database,
+  uid: string,
+  planId: string,
+  patch: Partial<Omit<WorkoutPlan, "created_at">>,
+): Promise<void> {
+  await update(ref(db, PATHS.workoutPlan(uid, planId)), { ...patch, updated_at: nowIso() });
+}
+
+export async function deleteWorkoutPlan(db: Database, uid: string, planId: string): Promise<void> {
+  await remove(ref(db, PATHS.workoutPlan(uid, planId)));
+}
+
+export async function setActiveWorkoutPlan(
+  db: Database,
+  uid: string,
+  planId: string,
+  plan: WorkoutPlan,
+): Promise<void> {
+  const payload: ActiveWorkoutPlan = { ...plan, plan_id: planId, set_at: nowIso() };
+  await set(ref(db, PATHS.activeWorkout(uid)), payload);
+}
+
+export async function clearActiveWorkoutPlan(db: Database, uid: string): Promise<void> {
   await remove(ref(db, PATHS.activeWorkout(uid)));
 }

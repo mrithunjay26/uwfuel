@@ -11,7 +11,15 @@ const PATTERNS: Record<Haptic, number | number[]> = {
 export function haptic(style: Haptic = "light") {
   if (typeof navigator === "undefined" || !("vibrate" in navigator)) return;
   try {
-    navigator.vibrate(PATTERNS[style]);
+    const root = typeof document !== "undefined" ? document.documentElement : null;
+    const level = root?.getAttribute("data-haptic") ?? "light";
+    if (level === "off") return;
+    const scale = level === "strong" ? 1.8 : level === "medium" ? 1.3 : 0.8;
+    const duration = root?.getAttribute("data-haptic-duration") ?? "normal";
+    const durationScale = duration === "long" ? 1.5 : duration === "short" ? 0.65 : 1;
+    const pattern = PATTERNS[style];
+    const scaled = (Array.isArray(pattern) ? pattern : [pattern]).map((value) => Math.max(1, Math.round(value * scale * durationScale)));
+    navigator.vibrate(Array.isArray(pattern) ? scaled : scaled[0]);
   } catch {
   }
 }

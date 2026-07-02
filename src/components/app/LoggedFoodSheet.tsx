@@ -15,7 +15,7 @@ interface LoggedFoodSheetProps {
 
 export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFoodSheetProps) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [draft, setDraft] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "", price: "", funding: "unknown" });
 
   useEffect(() => {
     if (entry) {
@@ -26,6 +26,8 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
         protein: String(Math.round(entry.protein_grams)),
         carbs: String(Math.round(entry.carbs_grams ?? 0)),
         fat: String(Math.round(entry.fat_grams ?? 0)),
+        price: String(entry.price ?? 0),
+        funding: entry.funding_source ?? "unknown",
       });
     }
   }, [entry]);
@@ -40,6 +42,8 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
       protein_grams: Math.max(0, Math.round(Number(draft.protein) || 0)),
       carbs_grams: Math.max(0, Math.round(Number(draft.carbs) || 0)),
       fat_grams: Math.max(0, Math.round(Number(draft.fat) || 0)),
+      price: Math.max(0, Number(draft.price) || 0),
+      funding_source: draft.funding as FoodLogEntry["funding_source"],
     });
     setEditing(false);
     onClose();
@@ -102,7 +106,7 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
           </div>
 
           {editing ? (
-            <div className="mt-4 grid grid-cols-4 gap-2">
+            <><div className="mt-4 grid grid-cols-4 gap-2">
               {([["calories", "Calories", "text-flame"], ["protein", "Protein", "text-protein"], ["carbs", "Carbs", "text-carbs"], ["fat", "Fat", "text-fat"]] as const).map(
                 ([key, label, color]) => (
                   <label key={key} className="glass-panel rounded-[14px] px-2 py-2.5 text-center">
@@ -117,7 +121,7 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
                   </label>
                 ),
               )}
-            </div>
+            </div><div className="mt-3 grid grid-cols-2 gap-2"><label className="text-[11px] font-bold text-ink-soft">Price<input type="number" min={0} step={0.01} value={draft.price} onChange={(e) => setDraft((d) => ({ ...d, price: e.target.value }))} className="mt-1 w-full rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[13px] text-ink outline-none" /></label><label className="text-[11px] font-bold text-ink-soft">Paid with<select value={draft.funding} onChange={(e) => setDraft((d) => ({ ...d, funding: e.target.value }))} className="mt-1 w-full rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[13px] text-ink"><option value="dining_plan">Dining Plan</option><option value="husky_card">Husky Card</option><option value="personal">Personal</option><option value="unknown">Not tracked</option></select></label></div></>
           ) : (
             <div className="mt-4 grid grid-cols-4 gap-2">
               {cells.map((m) => (

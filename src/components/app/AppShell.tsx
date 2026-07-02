@@ -34,12 +34,25 @@ const FAB_RADIUS: Record<FabShape, string> = {
   square: "rounded-[14px]",
 };
 
+const QUICK_ACTIONS = {
+  plan: { href: "/plan", label: "Plan", icon: CalendarCheck2 },
+  workout: { href: "/workout", label: "Train", icon: Dumbbell },
+  log: { href: "/log", label: "Log", icon: ClipboardList },
+  chat: { href: "/chat", label: "Chat", icon: MessageSquare },
+} as const;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { showWorkoutTabs } = useConfig();
   const { customize } = useCustomize();
   const dims = NAV_SIZES[customize.navSize] ?? NAV_SIZES.default;
-  const planActive = pathname === "/plan" || pathname.startsWith("/plan/");
+  const primary = QUICK_ACTIONS[customize.primaryAction] ?? QUICK_ACTIONS.plan;
+  const secondary = QUICK_ACTIONS[customize.secondaryAction] ?? QUICK_ACTIONS.log;
+  const PrimaryIcon = primary.icon;
+  const SecondaryIcon = secondary.icon;
+  const primaryActive = isRouteActive(pathname, primary.href);
+  const navTop = customize.navPosition === "top";
+  const workoutOled = pathname.startsWith("/log") && customize.workoutOled;
 
   const leftTabs: Tab[] = [
     { href: "/dashboard", label: "Home",   icon: Home },
@@ -56,18 +69,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       : []),
   ];
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const isActive = (href: string) => isRouteActive(pathname, href);
 
   return (
-    <div className="relative mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col">
-      <AuroraField />
+    <div className={`relative mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col ${workoutOled ? "workout-oled" : ""}`}>
+      {!workoutOled && <AuroraField />}
 
-      <div className="flex-1 pb-[calc(80px+env(safe-area-inset-bottom))]">{children}</div>
+      <div className={`flex-1 ${navTop ? "pt-[calc(74px+env(safe-area-inset-top))]" : "pb-[calc(80px+env(safe-area-inset-bottom))]"}`}>
+        <div key={pathname} className="page-anim">{children}</div>
+      </div>
 
       <InstallBanner />
 
-      <nav className="fixed inset-x-0 bottom-0 z-40">
-        <div className="mx-auto max-w-[480px] px-2 pb-[max(env(safe-area-inset-bottom),8px)]">
+      <nav className={`app-navigation fixed inset-x-0 z-40 ${navTop ? "top-0" : "bottom-0"}`}>
+        <div className={`relative mx-auto max-w-[480px] px-2 ${navTop ? "pt-[max(env(safe-area-inset-top),8px)]" : "pb-[max(env(safe-area-inset-bottom),8px)]"}`}>
+          {secondary.href !== primary.href && (
+            <Link
+              href={secondary.href}
+              onClick={() => haptic("light")}
+              aria-label={`Quick open ${secondary.label}`}
+              className={`press absolute z-10 grid size-10 place-items-center rounded-full border border-line bg-surface/90 text-accent shadow-[var(--shadow-md)] backdrop-blur-xl ${customize.handedness === "left" ? "left-4" : "right-4"} ${navTop ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]"}`}
+            >
+              <SecondaryIcon className="size-[18px]" />
+            </Link>
+          )}
           <div className="glass-nav relative flex items-center justify-between rounded-[26px] px-1.5 py-2">
 
             {leftTabs.map((t) => (
@@ -75,19 +100,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ))}
 
             <Link
-              href="/plan"
+              href={primary.href}
               onClick={() => haptic("medium")}
               className={cn(
-                "press -translate-y-3 grid place-items-center shadow-[var(--shadow-fab)]",
+                "press grid place-items-center shadow-[var(--shadow-fab)]",
+                customize.navMode === "fab" && (navTop ? "translate-y-3" : "-translate-y-3"),
                 FAB_RADIUS[customize.fabShape] ?? FAB_RADIUS.squircle,
-                planActive
+                primaryActive
                   ? "bg-accent text-accent-contrast ring-2 ring-accent/40 ring-offset-2 ring-offset-transparent"
                   : "bg-accent text-accent-contrast",
               )}
-              aria-label="Plan"
+              aria-label={primary.label}
               style={{ width: dims.fab, height: dims.fab, minWidth: dims.fab }}
             >
-              <CalendarCheck2 style={{ width: dims.icon + 1, height: dims.icon + 1 }} strokeWidth={planActive ? 2.5 : 2} />
+              <PrimaryIcon style={{ width: dims.icon + 1, height: dims.icon + 1 }} strokeWidth={primaryActive ? 2.5 : 2} />
             </Link>
 
             {rightTabs.map((t) => (
@@ -99,6 +125,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </nav>
     </div>
   );
+}
+
+function isRouteActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(href + "/");
 }
 
 function NavItem({

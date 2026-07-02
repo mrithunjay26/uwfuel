@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Boxes, Check, Flame, Plus, Trash2, X } from "lucide-react";
+import { Boxes, Check, Flame, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useFoodInventory, type InventoryItem } from "@/lib/hooks/useFoodInventory";
-import { saveInventoryFood, deleteInventoryFood } from "@/lib/db/userDb";
+import { saveInventoryFood, deleteInventoryFood, updateInventoryFood } from "@/lib/db/userDb";
 import type { InventoryFood } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
 
@@ -25,24 +25,42 @@ export function FoodInventorySheet({
   const [carbs, setCarbs] = useState("");
   const [fat, setFat] = useState("");
   const [serving, setServing] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [loggedId, setLoggedId] = useState<string | null>(null);
 
   if (!open) return null;
 
-  const resetForm = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setServing(""); setAdding(false); };
+  const resetForm = () => {
+    setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setServing("");
+    setAdding(false); setEditingId(null);
+  };
 
-  async function addFood() {
+  function startEdit(it: InventoryItem) {
+    setEditingId(it.id);
+    setName(it.name);
+    setCals(String(Math.round(it.calories)));
+    setProtein(String(Math.round(it.protein_grams)));
+    setCarbs(String(Math.round(it.carbs_grams ?? 0)));
+    setFat(String(Math.round(it.fat_grams ?? 0)));
+    setServing(it.serving ?? "");
+    setAdding(true);
+  }
+
+  async function saveFood() {
     if (!handle || !name.trim()) return;
-    const food: Omit<InventoryFood, "created_at"> = {
+    const food = {
       name: name.trim(),
       calories: Math.max(0, Math.round(Number(cals) || 0)),
       protein_grams: Math.max(0, Math.round(Number(protein) || 0)),
-      ...(Number(carbs) > 0 ? { carbs_grams: Math.round(Number(carbs)) } : {}),
-      ...(Number(fat) > 0 ? { fat_grams: Math.round(Number(fat)) } : {}),
-      ...(serving.trim() ? { serving: serving.trim() } : {}),
+      carbs_grams: Math.max(0, Math.round(Number(carbs) || 0)),
+      fat_grams: Math.max(0, Math.round(Number(fat) || 0)),
+      serving: serving.trim(),
     };
     haptic("success");
-    try { await saveInventoryFood(handle.db, handle.uid, food); } catch {}
+    try {
+      if (editingId) await updateInventoryFood(handle.db, handle.uid, editingId, food);
+      else await saveInventoryFood(handle.db, handle.uid, food);
+    } catch {}
     resetForm();
   }
 
@@ -106,7 +124,9 @@ export function FoodInventorySheet({
                 className="mt-2 w-full rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[12px] text-ink outline-none focus:border-accent"
               />
               <div className="mt-2.5 flex gap-2">
-                <button onClick={addFood} disabled={!name.trim()} className="press flex-1 rounded-[12px] bg-accent py-2 text-[13px] font-bold text-accent-contrast disabled:opacity-50">Save food</button>
+                <button onClick={saveFood} disabled={!name.trim()} className="press flex-1 rounded-[12px] bg-accent py-2 text-[13px] font-bold text-accent-contrast disabled:opacity-50">
+                  {editingId ? "Save changes" : "Save food"}
+                </button>
                 <button onClick={resetForm} className="press rounded-[12px] bg-surface-2 px-4 py-2 text-[13px] font-bold text-ink-soft">Cancel</button>
               </div>
             </div>
@@ -135,6 +155,13 @@ export function FoodInventorySheet({
                 className="press flex shrink-0 items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-[12px] font-bold text-accent-contrast"
               >
                 {loggedId === it.id ? <><Check className="size-3.5" /> Logged</> : <><Plus className="size-3.5" /> Log</>}
+              </button>
+              <button
+                onClick={() => startEdit(it)}
+                aria-label="Edit"
+                className="grid size-7 shrink-0 place-items-center rounded-full text-ink-faint hover:text-accent"
+              >
+                <Pencil className="size-3.5" />
               </button>
               <button
                 onClick={() => handle && deleteInventoryFood(handle.db, handle.uid, it.id).catch(() => {})}

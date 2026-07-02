@@ -32,9 +32,16 @@ export function useFlatMenu(enabled = true): { items: FlatMenuItem[]; loading: b
         if (cancelled) return;
         const names = Object.fromEntries(Object.entries(locs ?? {}).map(([id, l]) => [id, l.name]));
         const openMap = buildLocationOpenMap(locs ?? {});
-        setItems(flattenFullMenu(menu, names, openMap));
+        const next = flattenFullMenu(menu, names, openMap);
+        setItems(next);
+        try { localStorage.setItem("uwfuel.public-menu-cache", JSON.stringify({ savedAt: new Date().toISOString(), items: next })); } catch {}
       } catch {
-        if (!cancelled) setItems([]);
+        if (!cancelled) {
+          try {
+            const cached = JSON.parse(localStorage.getItem("uwfuel.public-menu-cache") || "null") as { items?: FlatMenuItem[] } | null;
+            setItems(Array.isArray(cached?.items) ? cached.items : []);
+          } catch { setItems([]); }
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
