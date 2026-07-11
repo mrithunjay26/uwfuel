@@ -16,7 +16,9 @@ import type {
   FoodExpense,
   FoodLogEntry,
   InventoryFood,
+  KitchenProfile,
   MealPlan,
+  PantryItem,
   OnboardingProfile,
   ReadinessCheck,
   UserProfile,
@@ -225,6 +227,40 @@ export async function updateInventoryFood(
   patch: Partial<Omit<InventoryFood, "created_at">>,
 ): Promise<void> {
   await update(ref(db, PATHS.inventoryItem(uid, id)), patch);
+}
+
+/* ── Dorm pantry & kitchen ──────────────────────────────────────────── */
+
+export async function writeKitchenProfile(
+  db: Database,
+  uid: string,
+  profile: Omit<KitchenProfile, "updated_at">,
+): Promise<void> {
+  await set(ref(db, PATHS.kitchen(uid)), { ...profile, updated_at: nowIso() } satisfies KitchenProfile);
+}
+
+export async function savePantryItem(
+  db: Database,
+  uid: string,
+  item: Omit<PantryItem, "added_at">,
+): Promise<string> {
+  const payload: PantryItem = { ...item, added_at: nowIso() };
+  const newRef = await push(ref(db, PATHS.pantry(uid)), payload);
+  if (!newRef.key) throw new Error("Firebase push returned no key.");
+  return newRef.key;
+}
+
+export async function updatePantryItem(
+  db: Database,
+  uid: string,
+  id: string,
+  patch: Partial<Omit<PantryItem, "added_at">>,
+): Promise<void> {
+  await update(ref(db, PATHS.pantryItem(uid, id)), patch);
+}
+
+export async function deletePantryItem(db: Database, uid: string, id: string): Promise<void> {
+  await remove(ref(db, PATHS.pantryItem(uid, id)));
 }
 
 export async function savePlanToRepo(

@@ -10,7 +10,7 @@ import { useConfig } from "@/lib/config/ConfigContext";
 import { useCamera } from "@/lib/hooks/useCamera";
 import { useFlatMenu } from "@/lib/hooks/useFlatMenu";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
-import { logFoodItem, saveInventoryFood } from "@/lib/db/userDb";
+import { logFoodItem, saveInventoryFood, savePantryItem } from "@/lib/db/userDb";
 import { todayPacificKey } from "@/lib/firebase/dining";
 import { matchCampusItem } from "@/lib/nutrition/campusMatch";
 import { estimateMacros, estimateProteinGrams } from "@/lib/utils/nutrition";
@@ -29,6 +29,7 @@ interface EditableFood {
   name: string;
   calories: number; protein: number; carbs: number; fat: number; // per single serving
   servings: number;
+  qty: string; // free-text quantity, used when adding to the pantry
   servingDescription?: string;
   confidence?: number;
   grounded?: boolean;
@@ -59,6 +60,7 @@ function toEditable(food: ScannedFood, menu: FlatMenuItem[]): EditableFood {
     carbs: food.carbs,
     fat: food.fat,
     servings: 1,
+    qty: food.servingDescription || "",
     servingDescription: food.servingDescription,
     confidence: food.confidence,
     grounded: food.grounded,
@@ -77,6 +79,7 @@ function blankFood(): EditableFood {
     name: "",
     calories: 0, protein: 0, carbs: 0, fat: 0,
     servings: 1,
+    qty: "",
     match: null,
     locationName: "Manual",
     locationId: "manual",
@@ -87,13 +90,17 @@ function blankFood(): EditableFood {
 }
 
 export function MealScannerSheet({
-  open, onClose, onLogged, dateKey,
+  open, onClose, onLogged, dateKey, target = "log", onAddedToPantry,
 }: {
   open: boolean;
   onClose: () => void;
   onLogged?: (msg: string) => void;
   dateKey?: string;
+  /** "log" (default) logs scanned foods to the journal; "pantry" adds them to the dorm pantry. */
+  target?: "log" | "pantry";
+  onAddedToPantry?: (msg: string) => void;
 }) {
+  const pantryMode = target === "pantry";
   const handle = useUserDb();
   const { cohereKey, groqKey } = useConfig();
   const day = dateKey ?? todayPacificKey();
@@ -314,6 +321,8 @@ export function MealScannerSheet({
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, [key]: Math.max(0, val) } : f)));
   const setName = (id: string, name: string) =>
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, name } : f)));
+  const setQty = (id: string, qty: string) =>
+    setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, qty } : f)));
   const setPrice = (id: string, price: number) =>
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, price: Math.max(0, price) } : f)));
   const setFunding = (id: string, funding: FoodFundingSource) =>
@@ -345,6 +354,7 @@ export function MealScannerSheet({
         carbs: Math.round(sum.carbs),
         fat: Math.round(sum.fat),
         servings: 1,
+        qty: "",
         servingDescription: `${prev.length} items combined`,
         match: null,
         locationName: "Scan",
@@ -420,6 +430,29 @@ export function MealScannerSheet({
     }
   }, [handle, foods, day, onLogged, onClose]);
 
+  const addAllToPantry = useCallback(async () => {
+    if (!handle) { onAddedToPantry?.("Sign in to save your pantry."); return; }
+    const items = foods.filter((f) => f.name.trim());
+    if (items.length === 0) return;
+    setLogging(true);
+    try {
+      for (const f of items) {
+        await savePantryItem(handle.db, handle.uid, {
+          name: f.name.trim(),
+          ...(f.qty.trim() ? { quantity: f.qty.trim() } : {}),
+          category: "other",
+        });
+      }
+      haptic("medium");
+      onAddedToPantry?.(`Added ${items.length} to your pantry ✓`);
+      onClose();
+    } catch {
+      setError("Couldn't save. Check your connection.");
+    } finally {
+      setLogging(false);
+    }
+  }, [handle, foods, onAddedToPantry, onClose]);
+
   if (!open) return null;
 
   const cameraMode = mode === "photo" || mode === "barcode";
@@ -430,7 +463,7 @@ export function MealScannerSheet({
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3">
         <h2 className="flex items-center gap-2 font-display text-[16px] font-extrabold text-white">
-          <Sparkles className="size-4 text-accent" /> Scan a meal
+          <Sparkles className="size-4 text-accent" /> {pantryMode ? "Scan your pantry" : "Scan a meal"}
         </h2>
         <button onClick={onClose} aria-label="Close" className="grid size-9 place-items-center rounded-full bg-white/10 text-white">
           <X className="size-5" />
@@ -569,7 +602,13 @@ export function MealScannerSheet({
         {phase === "results" && (
           <div className="thin-scrollbar absolute inset-0 overflow-y-auto bg-bg px-4 py-4">
             <div className="flex flex-col gap-3">
-              {foods.length > 0 && (
+              {pantryMode && foods.length > 0 && (
+                <div className="rounded-[16px] bg-accent-soft px-4 py-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-accent-ink">Found {foods.length} item{foods.length > 1 ? "s" : ""}</p>
+                  <p className="mt-0.5 text-[12px] text-ink-soft">Review names &amp; quantities, then add them to your pantry. You can fine-tune portions anytime.</p>
+                </div>
+              )}
+              {!pantryMode && foods.length > 0 && (
                 <div className="rounded-[16px] bg-accent-soft px-4 py-3">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wide text-accent-ink">
@@ -592,7 +631,7 @@ export function MealScannerSheet({
                   )}
                 </div>
               )}
-              {dietaryAssessment?.status === "blocked" && (
+              {!pantryMode && dietaryAssessment?.status === "blocked" && (
                 <div role="alert" className="rounded-[16px] border border-danger/30 bg-danger/10 px-4 py-3">
                   <p className="flex items-center gap-2 text-[12px] font-bold text-danger">
                     <AlertTriangle className="size-4 shrink-0" /> Dietary conflict detected
@@ -602,7 +641,7 @@ export function MealScannerSheet({
                   </p>
                 </div>
               )}
-              {dietaryAssessment?.status === "unknown" && (
+              {!pantryMode && dietaryAssessment?.status === "unknown" && (
                 <div role="status" className="rounded-[16px] border border-line bg-surface-2 px-4 py-3">
                   <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
                     <AlertTriangle className="size-4 shrink-0 text-ink-faint" /> Dietary status unverified
@@ -648,6 +687,27 @@ export function MealScannerSheet({
                 </div>
               )}
               {foods.map((f) => {
+                if (pantryMode) {
+                  return (
+                    <div key={f.id} className="glass-panel flex items-center gap-2 rounded-[16px] p-3">
+                      <div className="min-w-0 flex-1">
+                        <input
+                          value={f.name}
+                          onChange={(e) => setName(f.id, e.target.value)}
+                          placeholder="Item name"
+                          className="w-full bg-transparent font-display text-[14px] font-extrabold text-ink outline-none placeholder:text-ink-faint"
+                        />
+                        <input
+                          value={f.qty}
+                          onChange={(e) => setQty(f.id, e.target.value)}
+                          placeholder="Quantity (optional) — e.g. 2 cans, half a bag"
+                          className="mt-0.5 w-full bg-transparent text-[12px] text-ink-soft outline-none placeholder:text-ink-faint"
+                        />
+                      </div>
+                      <button onClick={() => removeFood(f.id)} aria-label="Remove" className="grid size-7 shrink-0 place-items-center rounded-full text-ink-faint hover:text-danger"><Trash2 className="size-3.5" /></button>
+                    </div>
+                  );
+                }
                 const m = f.servings;
                 return (
                   <div key={f.id} className="glass-panel rounded-[18px] p-3.5">
@@ -762,7 +822,7 @@ export function MealScannerSheet({
                 );
               })}
 
-              {ingredients.length > 0 && (
+              {!pantryMode && ingredients.length > 0 && (
                 <div className="glass-panel rounded-[16px] p-3.5">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Ingredients</p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -831,11 +891,13 @@ export function MealScannerSheet({
       {phase === "results" && (
         <div className="px-4 pb-[max(env(safe-area-inset-bottom),16px)] pt-3">
           <button
-            onClick={logAll}
+            onClick={pantryMode ? addAllToPantry : logAll}
             disabled={logging || foods.length === 0}
             className="press flex w-full items-center justify-center gap-2 rounded-[16px] bg-accent py-3.5 text-[15px] font-bold text-accent-contrast disabled:opacity-60"
           >
-            {logging ? <><Check className="size-4" /> Logging…</> : <><Plus className="size-4" strokeWidth={2.5} /> Log {foods.length} item{foods.length > 1 ? "s" : ""}</>}
+            {logging
+              ? <><Check className="size-4" /> {pantryMode ? "Adding…" : "Logging…"}</>
+              : <><Plus className="size-4" strokeWidth={2.5} /> {pantryMode ? "Add" : "Log"} {foods.length} item{foods.length > 1 ? "s" : ""}{pantryMode ? " to pantry" : ""}</>}
           </button>
         </div>
       )}

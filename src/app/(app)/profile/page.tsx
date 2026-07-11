@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,6 +20,7 @@ import {
   Sparkles,
   Sun,
   Upload,
+  Utensils,
   WalletCards,
   type LucideIcon,
 } from "lucide-react";
@@ -34,6 +35,11 @@ import { useAuth } from "@/lib/auth/AuthContext";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useTheme } from "@/lib/theme/ThemeContext";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
+import { useUserDb } from "@/lib/hooks/useUserDb";
+import { useKitchen } from "@/lib/hooks/usePantry";
+import { writeKitchenProfile } from "@/lib/db/userDb";
+import { APPLIANCES } from "@/lib/pantry/pantry";
+import type { KitchenAccess } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
 
 const REPO_URL = "https://github.com/mrithunjay26/uwfuel";
@@ -96,6 +102,8 @@ export default function ProfilePage() {
           <span className="min-w-0 flex-1"><span className="block font-display text-[15px] font-bold text-ink">Everyday setup &amp; food wallets</span><span className="block text-[11px] text-ink-soft">Dining Plan, personal budget, cooking access, and food rules</span></span>
           <ChevronRight className="size-4 text-ink-faint" />
         </Link>
+
+        <KitchenSection />
 
         <section className="glass-panel rounded-[20px] p-4">
           <div className="flex items-center gap-2">
@@ -359,6 +367,68 @@ export default function ProfilePage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+const KITCHEN_ACCESS: { v: KitchenAccess; label: string }[] = [
+  { v: "none", label: "No kitchen" },
+  { v: "shared", label: "Shared kitchen" },
+  { v: "full", label: "Full kitchen" },
+];
+
+/** Dorm-kitchen access + appliances. This is what the pantry recipe finder filters against. */
+function KitchenSection() {
+  const handle = useUserDb();
+  const { kitchen } = useKitchen();
+  const [access, setAccess] = useState<KitchenAccess>("shared");
+  const [appliances, setAppliances] = useState<string[]>([]);
+  const seeded = useRef(false);
+
+  useEffect(() => {
+    if (kitchen && !seeded.current) {
+      seeded.current = true;
+      setAccess(kitchen.access);
+      setAppliances(kitchen.appliances ?? []);
+    }
+  }, [kitchen]);
+
+  const persist = useCallback((nextAccess: KitchenAccess, nextAppliances: string[]) => {
+    if (handle) writeKitchenProfile(handle.db, handle.uid, { access: nextAccess, appliances: nextAppliances }).catch(() => {});
+  }, [handle]);
+
+  function chooseAccess(v: KitchenAccess) { setAccess(v); persist(v, appliances); haptic("light"); }
+  function toggleAppliance(a: string) {
+    setAppliances((prev) => {
+      const next = prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a];
+      persist(access, next);
+      return next;
+    });
+    haptic("light");
+  }
+
+  return (
+    <section className="glass-panel rounded-[20px] p-4">
+      <div className="flex items-center gap-2">
+        <span className="grid size-9 place-items-center rounded-[12px] bg-accent-soft text-accent"><Utensils className="size-[18px]" /></span>
+        <div>
+          <h2 className="font-display text-[15px] font-bold text-ink">Dorm kitchen</h2>
+          <p className="text-[11px] text-ink-soft">Powers the pantry recipe finder in the Dining tab.</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        {KITCHEN_ACCESS.map((o) => (
+          <button key={o.v} onClick={() => chooseAccess(o.v)} className={`press flex-1 rounded-[12px] py-2 text-[12px] font-bold transition ${access === o.v ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"}`}>{o.label}</button>
+        ))}
+      </div>
+
+      <p className="mt-3 text-[10px] font-bold uppercase tracking-wide text-ink-faint">Appliances you have</p>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {APPLIANCES.map((a) => (
+          <button key={a} onClick={() => toggleAppliance(a)} className={`press rounded-full px-2.5 py-1 text-[11px] font-bold transition ${appliances.includes(a) ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"}`}>{a}</button>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -6,6 +6,7 @@ import { useConfig } from "@/lib/config/ConfigContext";
 import { Portal } from "@/components/ui/Portal";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
+import { usePantry, useKitchen } from "@/lib/hooks/usePantry";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
 import { useActivePlan } from "@/lib/hooks/useActivePlan";
 import { callCohere } from "@/lib/ai/cohere";
@@ -44,6 +45,8 @@ export function MealPlannerSheet({ open, onClose, menuItems }: MealPlannerSheetP
   const { cohereKey, hasCohere } = useConfig();
   const handle = useUserDb();
   const { profile } = useUserProfile();
+  const { items: pantry } = usePantry();
+  const { kitchen } = useKitchen();
   const { schedule: classSchedule, todayStops } = useClassSchedule();
   const { activePlan } = useActivePlan();
 
@@ -77,6 +80,10 @@ export function MealPlannerSheet({ open, onClose, menuItems }: MealPlannerSheetP
       ? `Today's class stops: ${todayStops.map((s) => `${s.building_label} (${s.start_time}–${s.end_time})`).join("; ")}.`
       : "No classes today.";
 
+    const pantryCtx = pantry.length > 0
+      ? `The student also has these ingredients at home: ${pantry.slice(0, 40).map((p) => p.name).join(", ")}. Kitchen: ${kitchen?.access ?? "shared"} access${kitchen?.appliances?.length ? ` with ${kitchen.appliances.join(", ")}` : ""}. When it saves money or fits their goal, you may suggest a quick home-cooked meal — set its location_name to "Dorm kitchen" and estimated_cost near $0.`
+      : "";
+
     return [
       {
         role: "system" as const,
@@ -105,11 +112,12 @@ Always respond with ONLY a valid JSON object (no markdown, no extra text) in thi
         content: `Plan ${mealCount} meals for today.
 Goal: ${phase} (target ${targetKcal} kcal/day, ${weight} lbs).
 ${classCtx}
+${pantryCtx}
 Today's available items:\n${sample || "No menu data — make reasonable suggestions."}
 Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cut" : phase === "bulk" ? "a bulk" : "maintenance"}.`,
       },
     ];
-  }, [mealCount, menuItems, profile, todayStops]);
+  }, [mealCount, menuItems, profile, todayStops, pantry, kitchen]);
 
   async function handleGenerate() {
     if (!handle || !cohereKey) return;

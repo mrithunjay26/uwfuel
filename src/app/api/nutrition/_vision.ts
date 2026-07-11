@@ -271,3 +271,88 @@ export async function visionAnalyze(opts: {
   }
   throw new UpstreamError(503, "No vision provider available. Add a Cohere or Groq key in Settings to scan meals.");
 }
+
+/* ── Generic JSON completion (custom prompt) — used by pantry / recipes ── */
+
+function genericContent(prompt: string, imageB64: string | null): unknown[] {
+  const content: unknown[] = [{ type: "text", text: prompt }];
+  if (imageB64) {
+    const url = imageB64.startsWith("data:") ? imageB64 : `data:image/jpeg;base64,${imageB64}`;
+    content.push({ type: "image_url", image_url: { url } });
+  }
+  return content;
+}
+
+async function rawCohere(apiKey: string, prompt: string, imageB64: string | null): Promise<string> {
+  const model = imageB64 ? (process.env.COHERE_VISION_MODEL || "command-a-vision-07-2025") : "command-a-03-2025";
+  const json = (await postJsonRetry("https://api.cohere.com/v2/chat", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: genericContent(prompt, imageB64) }], temperature: 0.3, response_format: { type: "json_object" } }),
+  })) as { message?: { content?: { text?: string }[] } };
+  return (json.message?.content || []).map((p) => p.text || "").join("");
+}
+
+async function rawGroq(apiKey: string, prompt: string, imageB64: string | null): Promise<string> {
+  const model = process.env.GROQ_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+  const json = (await postJsonRetry("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages: [{ role: "user", content: genericContent(prompt, imageB64) }], temperature: 0.3, response_format: { type: "json_object" } }),
+  })) as { choices?: { message?: { content?: string } }[] };
+  return json.choices?.[0]?.message?.content ?? "";
+}
+
+async function rawGemini(prompt: string, imageB64: string | null): Promise<string> {
+  const key = process.env.GEMINI_API_KEY!;
+  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const parts: unknown[] = [{ text: prompt }];
+  if (imageB64) { const { data, mime } = rawBase64(imageB64); parts.push({ inline_data: { mime_type: mime, data } }); }
+  const json = (await postJsonRetry(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts }], generationConfig: { temperature: 0.3, responseMimeType: "application/json" } }) },
+  )) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return json.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") ?? "";
+}
+
+async function rawClaude(prompt: string, imageB64: string | null): Promise<string> {
+  const key = process.env.ANTHROPIC_API_KEY!;
+  const model = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+  const content: unknown[] = [];
+  if (imageB64) { const { data, mime } = rawBase64(imageB64); content.push({ type: "image", source: { type: "base64", media_type: mime, data } }); }
+  content.push({ type: "text", text: prompt });
+  const json = (await postJsonRetry("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: 1500, temperature: 0.3, messages: [{ role: "user", content }] }),
+  })) as { content?: { text?: string }[] };
+  return json.content?.map((c) => c.text || "").join("") ?? "";
+}
+
+function rawFallback(prompt: string, imageB64: string | null): Promise<string> {
+  const p = fallbackProvider();
+  if (p === "claude") return rawClaude(prompt, imageB64);
+  if (p === "groq") return rawGroq(process.env.GROQ_API_KEY!, prompt, imageB64);
+  return rawGemini(prompt, imageB64);
+}
+
+/** Run a custom prompt (optionally with an image) and return parsed JSON. Same provider fallback as visionAnalyze. */
+export async function llmJson<T = unknown>(opts: {
+  prompt: string;
+  imageB64?: string;
+  cohereKey?: string;
+  groqKey?: string;
+}): Promise<T> {
+  const image = opts.imageB64 ?? null;
+  let lastErr: unknown;
+  const attempts: (() => Promise<string>)[] = [];
+  if (opts.cohereKey) attempts.push(() => rawCohere(opts.cohereKey!, opts.prompt, image));
+  if (opts.groqKey) attempts.push(() => rawGroq(opts.groqKey!, opts.prompt, image));
+  if (fallbackConfigured()) attempts.push(() => rawFallback(opts.prompt, image));
+  for (const attempt of attempts) {
+    try { return extractJsonObject<T>(await attempt()); }
+    catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw lastErr instanceof UpstreamError ? lastErr : new UpstreamError(502, lastErr instanceof Error ? lastErr.message : "AI failed.");
+  throw new UpstreamError(503, "No AI provider available. Add a Cohere or Groq key in Settings.");
+}

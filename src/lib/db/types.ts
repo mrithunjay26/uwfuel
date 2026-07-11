@@ -52,6 +52,23 @@ export interface InventoryFood {
 }
 export type FoodInventory = Record<string, InventoryFood>;
 
+/** A dorm kitchen: what the student can cook with. */
+export interface KitchenProfile {
+  access: KitchenAccess;      // none | shared | full
+  appliances: string[];       // e.g. "Microwave", "Air fryer"
+  updated_at: string;
+}
+
+/** An item the student currently has on hand in their dorm pantry / mini-fridge. */
+export interface PantryItem {
+  name: string;
+  quantity?: string;          // free text, e.g. "2 cans", "half a bag"
+  category?: string;          // produce | protein | grain | dairy | snack | condiment | frozen | other
+  image?: string;             // optional product/ingredient thumbnail (from Open Food Facts)
+  added_at: string;
+}
+export type Pantry = Record<string, PantryItem>;
+
 export type HousingContext = "residence_hall" | "campus_apartment" | "commuter_off_campus" | "other";
 export type KitchenAccess = "none" | "shared" | "full";
 export type FoodFundingSource = "dining_plan" | "husky_card" | "personal" | "unknown";

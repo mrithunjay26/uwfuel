@@ -12,6 +12,10 @@ export const PATHS = {
   foodInventory: (uid: string) => `users/${uid}/food_inventory`,
   inventoryItem: (uid: string, id: string) => `users/${uid}/food_inventory/${id}`,
 
+  pantry: (uid: string) => `users/${uid}/pantry`,
+  pantryItem: (uid: string, id: string) => `users/${uid}/pantry/${id}`,
+  kitchen: (uid: string) => `users/${uid}/kitchen`,
+
   onboardingProfile: (uid: string) => `users/${uid}/onboarding_profile`,
   foodExpenses: (uid: string) => `users/${uid}/food_expenses`,
   foodExpense: (uid: string, id: string) => `users/${uid}/food_expenses/${id}`,

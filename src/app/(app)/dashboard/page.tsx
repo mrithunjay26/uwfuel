@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Boxes, CalendarDays, Camera, ChevronLeft, ChevronRight, Sparkles, Target, User } from "lucide-react";
+import { BookOpen, Boxes, CalendarDays, Camera, ChefHat, ChevronLeft, ChevronRight, Sparkles, Target, User } from "lucide-react";
 import { Ring } from "@/components/ui/Ring";
 import { GoalModal } from "@/components/app/GoalModal";
 import { JournalCard } from "@/components/app/JournalCard";
@@ -343,6 +343,20 @@ export default function DashboardPage() {
           </div>
           <ChevronRight className="size-4 shrink-0 text-ink-faint" />
         </button>
+
+        <Link
+          href="/menu?tab=pantry"
+          className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-line bg-surface px-4 py-3.5 text-left"
+        >
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-accent">
+            <ChefHat className="size-[18px]" />
+          </span>
+          <div className="flex-1">
+            <p className="text-[13px] font-bold text-ink">Dorm pantry</p>
+            <p className="text-[11px] text-ink-soft">Track what you have &amp; find recipes you can cook.</p>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+        </Link>
 
         {!profileLoading && !profile && (
           <button

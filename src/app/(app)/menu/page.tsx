@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Camera, MapPin, Search, UtensilsCrossed, X } from "lucide-react";
+import { Boxes, Camera, MapPin, Search, UtensilsCrossed, X } from "lucide-react";
 import { MealCard } from "@/components/app/MealCard";
 import { MealScannerSheet } from "@/components/app/MealScannerSheet";
+import { PantryTab } from "@/components/app/PantryTab";
 import { SCAN_ENABLED } from "@/lib/nutrition/scan";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
@@ -35,7 +36,7 @@ import { MealDetailSheet } from "@/components/app/MealDetailSheet";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { assessDietarySafety, type DietaryAssessment } from "@/lib/dietary/safety";
 
-type PageTab = "menu" | "map";
+type PageTab = "menu" | "pantry" | "map";
 
 const FILTER_CHIPS: { value: MenuFilter; label: string }[] = [
   { value: "all",        label: "All" },
@@ -56,9 +57,11 @@ export default function MenuPage() {
   const { position: userGeo } = useGeolocation();
   const { profile: setupProfile } = useOnboardingProfile();
 
-  const [pageTab, setPageTab] = useState<PageTab>(
-    searchParams.get("tab") === "map" ? "map" : "menu",
-  );
+  const [pageTab, setPageTab] = useState<PageTab>(() => {
+    const t = searchParams.get("tab");
+    return t === "map" || t === "pantry" ? t : "menu";
+  });
+  const [scanTarget, setScanTarget] = useState<"log" | "pantry">("log");
 
   const [locations,     setLocations]     = useState<DiningLocationsSnapshot | null>(null);
   const [menuSnapshot,  setMenuSnapshot]  = useState<DiningMenuSnapshot | null>(null);
@@ -239,7 +242,13 @@ export default function MenuPage() {
     <div className="flex min-h-screen flex-col">
 
       {SCAN_ENABLED && (
-        <MealScannerSheet open={scanOpen} onClose={() => setScanOpen(false)} onLogged={showToast} />
+        <MealScannerSheet
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          onLogged={showToast}
+          onAddedToPantry={showToast}
+          target={scanTarget}
+        />
       )}
 
       {toastMsg && (
@@ -249,7 +258,7 @@ export default function MenuPage() {
       )}
 
       <AuroraHeader
-        title="Campus Dining"
+        title="Dining"
         icon={<UtensilsCrossed className="size-[18px]" />}
         right={
           <div className="flex items-center gap-2">
@@ -260,7 +269,7 @@ export default function MenuPage() {
             )}
             {SCAN_ENABLED && (
               <button
-                onClick={() => setScanOpen(true)}
+                onClick={() => { setScanTarget("log"); setScanOpen(true); }}
                 aria-label="Scan a meal"
                 className="press grid size-9 place-items-center rounded-full bg-accent text-accent-contrast shadow-[var(--shadow-sm)]"
               >
@@ -271,7 +280,11 @@ export default function MenuPage() {
         }
       >
         <div className="glass-soft mt-3 flex gap-1 rounded-[16px] p-1">
-          {(["menu", "map"] as const).map((t) => (
+          {([
+            ["menu", "Menu", UtensilsCrossed],
+            ["pantry", "Pantry", Boxes],
+            ["map", "Map", MapPin],
+          ] as const).map(([t, label, Icon]) => (
             <button
               key={t}
               onClick={() => setPageTab(t)}
@@ -281,11 +294,7 @@ export default function MenuPage() {
                   : "text-ink-soft"
               }`}
             >
-              {t === "menu" ? (
-                <><UtensilsCrossed className="size-3.5" /> Menu</>
-              ) : (
-                <><MapPin className="size-3.5" /> Map</>
-              )}
+              <Icon className="size-3.5" /> {label}
             </button>
           ))}
         </div>
@@ -329,6 +338,11 @@ export default function MenuPage() {
           totalItems={allItems.length}
           hiddenUnsafe={rawItems.length - allItems.length}
           safetyByKey={safetyByKey}
+        />
+      ) : pageTab === "pantry" ? (
+        <PantryTab
+          canScan={SCAN_ENABLED}
+          onScanShelf={() => { setScanTarget("pantry"); setScanOpen(true); }}
         />
       ) : (
         <MapTabContent
