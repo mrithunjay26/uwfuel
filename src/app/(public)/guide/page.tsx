@@ -32,8 +32,14 @@ const FIREBASE_CONFIG_EXAMPLE = `const firebaseConfig = {
 
 const FIREBASE_RULES = `{
   "rules": {
-    ".read": true,
-    ".write": true
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "$uid === 'YOUR_ACCOUNT_ID'",
+        ".write": "$uid === 'YOUR_ACCOUNT_ID'"
+      }
+    }
   }
 }`;
 
@@ -48,8 +54,8 @@ export default function GuidePage() {
           Let’s get you set up
         </h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink-soft md:text-[17px]">
-          This is a slow, friendly walkthrough with <b className="font-semibold text-ink">no coding or tech experience needed</b>.
-          We’ll explain every term and tell you exactly what to click. By the end, all of UW Fuel’s features will work.
+          No coding needed. Every step says exactly what to tap. Do part 1 and the AI works; part 2 is
+          only if you want your data in your own Google account.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <TimeBadge time="~10 minutes" />
@@ -62,7 +68,7 @@ export default function GuidePage() {
         <p className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Before you start</p>
         <ul className="mt-2 flex flex-col gap-1.5 text-[14px] text-ink-soft">
           <li className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-carbs" /> Your phone or laptop, that’s it.</li>
-          <li className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-carbs" /> About 10 minutes of calm. We’ll go one tiny step at a time.</li>
+          <li className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-carbs" /> About 10 minutes.</li>
           <li className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-carbs" /> A Google or email account to make a free Cohere account.</li>
         </ul>
       </div>
@@ -167,12 +173,29 @@ export default function GuidePage() {
                 <p className="text-[13px] text-ink-faint">You’ll copy the five values from <i>your</i> version into UW Fuel in step 5.</p>
               </WalkStep>
 
-              <WalkStep n={4} title="Set your security rules">
-                <p>Go back to <Kbd>Realtime Database</Kbd> and open the <Kbd>Rules</Kbd> tab. Replace what’s there with the text below and click <Kbd>Publish</Kbd>.</p>
+              <WalkStep n={4} title="Lock it down (do not skip)">
+                <p>
+                  Test mode leaves your database wide open to the whole internet. Anyone who finds the address
+                  can read everything in it, change it, or delete all of it. Fix that now, it takes 30 seconds.
+                </p>
+                <p>First grab your account ID from UW Fuel:</p>
+                <ClickPath steps={["Profile", "Data Storage", "Copy ID"]} />
+                <p>Then open <Kbd>Realtime Database</Kbd> → the <Kbd>Rules</Kbd> tab, replace everything with this, swap in your ID, and hit <Kbd>Publish</Kbd>.</p>
                 <CodeBlock label="Realtime Database rules" code={FIREBASE_RULES} />
-                <Callout type="warn" title="Keep your database URL private">
-                  With these rules, anyone who knows your database’s web address could read or change it. Don’t post your <Kbd>databaseURL</Kbd> publicly.
-                  If you want stronger security with zero setup, simply skip this part and use the shared database, which is locked to your account automatically.
+                <p className="text-[13px] text-ink-faint">
+                  Replace <span className="font-mono">YOUR_ACCOUNT_ID</span> with the ID you copied. Keep the quotes.
+                </p>
+                <Callout type="warn" title="What these rules do, and don't do">
+                  They shut the door on everything except your own folder, so nobody can browse the root, dump the
+                  whole database, or wipe it. They can&apos;t make the address secret though: your database has no
+                  login, so anyone holding <i>both</i> your <Kbd>databaseURL</Kbd> and your account ID could still read
+                  that folder. Never paste either into a repo, a screenshot, or a Discord server. Want none of this
+                  risk? Skip this part and stay on the shared database, which is locked to your account for you.
+                </Callout>
+                <Callout type="tip" title="How UW Fuel stores these details">
+                  Your firebaseConfig and AI keys are encrypted (AES-256-GCM) before they are written to our
+                  database, and tied to your account so another account can&apos;t unlock them. We never write them
+                  to your browser storage.
                 </Callout>
               </WalkStep>
 
@@ -249,7 +272,7 @@ export default function GuidePage() {
             <div className="flex flex-col gap-3">
               {[
                 ["Is UW Fuel really free?", "Yes. The app is free and open source. Cohere’s trial AI key is free too."],
-                ["Is my data safe?", "Your AI key and database settings are stored in the database scoped to your account, never in your browser. You can read the full Privacy Policy below."],
+                ["Is my data safe?", "Your AI key and database details are encrypted before they're stored, scoped to your account, and never written to your browser. If you connect your own database, its safety is down to the rules in Part 2, so use the locked-down ones."],
                 ["Do I have to set up a database?", "No, that part is optional. Everything works on the shared project, isolated to your account."],
                 ["Can I remove my key later?", "Anytime, in Profile → AI key → Remove. Same for disconnecting a personal database."],
               ].map(([q, a]) => (

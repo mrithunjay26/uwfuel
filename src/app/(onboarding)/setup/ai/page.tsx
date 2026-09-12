@@ -17,11 +17,6 @@ export default function SetupAIPage() {
       <div className="mt-7">
         <ConnectAIForm saveLabel="Save AI key" onSaved={back} onSkip={back} />
       </div>
-      <p className="mt-5 rounded-[14px] bg-surface-2 px-4 py-3 text-[12px] leading-relaxed text-ink-soft">
-        Tip: for a <b className="text-ink">free</b> scanner backup that works even when Cohere is
-        busy, add a Groq key in <b className="text-ink">Settings → Meal scanner key</b>. Grab one free
-        at <span className="font-semibold text-accent-ink">console.groq.com/keys</span>.
-      </p>
     </div>
   );
 }

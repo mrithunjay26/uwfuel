@@ -1,5 +1,6 @@
 import { get, ref } from "firebase/database";
 import { getDiningDb } from "@/lib/firebase/diningApp";
+import { cacheRead, cacheReadFresh, cacheWrite } from "@/lib/offline/cache";
 
 export interface DiningMetadata {
   last_scrape_at: string;
@@ -28,9 +29,6 @@ export interface DiningMenuItem {
   ingredients: string[];
   allergens: string[];
   protein_grams: number;
-  // Optional Dub Grub deep-link, populated by the scraper once item URLs are
-  // confirmed. When absent we fall back to the location storefront (see
-  // src/lib/dining/ordering.ts).
   order_url?: string;
   orderable?: boolean;
 }
@@ -92,9 +90,29 @@ export async function getDiningMetadata(): Promise<DiningMetadata | null> {
   return snap.exists() ? (snap.val() as DiningMetadata) : null;
 }
 
+async function cachedGet<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T | null> {
+  const fresh = cacheReadFresh<T>(key, ttlMs);
+  if (fresh !== null) return fresh;
+  try {
+    const value = await fetcher();
+    if (value !== null && value !== undefined) cacheWrite(key, value);
+    return value;
+  } catch (err) {
+    const stale = cacheRead<T>(key);
+    if (stale !== null) return stale;
+    throw err;
+  }
+}
+
+const LOCATIONS_TTL = 12 * 60 * 60 * 1000;
+const MENU_TTL = 6 * 60 * 60 * 1000;
+
 export async function getDiningLocations(): Promise<DiningLocationsSnapshot> {
-  const snap = await get(ref(getDiningDb(), "uw_dining/locations"));
-  return snap.exists() ? (snap.val() as DiningLocationsSnapshot) : {};
+  const value = await cachedGet<DiningLocationsSnapshot>("dining:locations", LOCATIONS_TTL, async () => {
+    const snap = await get(ref(getDiningDb(), "uw_dining/locations"));
+    return snap.exists() ? (snap.val() as DiningLocationsSnapshot) : {};
+  });
+  return value ?? {};
 }
 
 export async function getDiningMenu(
@@ -104,9 +122,11 @@ export async function getDiningMenu(
   const path = locationId
     ? `uw_dining/menus/${dateKey}/${locationId}`
     : `uw_dining/menus/${dateKey}`;
-  const snap = await get(ref(getDiningDb(), path));
-  if (!snap.exists()) return null;
-  return snap.val() as DiningMenuSnapshot | DiningMenuLocation;
+  return cachedGet(`dining:menu:${dateKey}${locationId ? `:${locationId}` : ""}`, MENU_TTL, async () => {
+    const snap = await get(ref(getDiningDb(), path));
+    if (!snap.exists()) return null;
+    return snap.val() as DiningMenuSnapshot | DiningMenuLocation;
+  });
 }
 
 export function isLocationOpenNow(hoursText: string | undefined): boolean | null {

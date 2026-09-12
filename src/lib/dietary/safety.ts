@@ -27,7 +27,6 @@ function stringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
-/** Firebase omits empty arrays, so normalize both new and legacy setup records at the boundary. */
 export function normalizeDietarySafetyProfile(profile: Partial<DietarySafetyProfile> | null | undefined): DietarySafetyProfile | null {
   if (!profile) return null;
   return {

@@ -1,7 +1,6 @@
 import type { LoggedSet, WorkoutLog, WorkoutLogExercise, ExerciseType } from "@/lib/db/types";
 import { resolveBodyPart } from "@/lib/workout/bodyParts";
 
-/** Parse one CSV line, honoring quoted fields. */
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];
   let cur = "";
@@ -30,13 +29,13 @@ function distanceToMiles(value: number, unit: string): number {
   if (u === "km" || u === "kilometers") return value * 0.621371;
   if (u === "m" || u === "meters") return value / 1609.34;
   if (u === "yd" || u === "yards") return value / 1760;
-  return value; // miles / mi / unknown → assume miles
+  return value;
 }
 
 function timeToSeconds(raw: string): number {
   const t = raw.trim();
   if (!t) return 0;
-  if (/^\d+$/.test(t)) return parseInt(t, 10); // already seconds
+  if (/^\d+$/.test(t)) return parseInt(t, 10);
   const parts = t.split(":").map((p) => parseInt(p, 10) || 0);
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
@@ -50,11 +49,6 @@ export interface FitNotesImportResult {
   exerciseCount: number;
 }
 
-/**
- * Parse a FitNotes CSV export into per-day WorkoutLogs.
- * Columns: Date,Exercise,Category,Weight (kg),Weight (lbs),Reps,Distance,Distance Unit,Time,Notes,Kind
- * One row = one set; rows are grouped by date, then by exercise (order preserved).
- */
 export function parseFitNotesCsv(text: string): FitNotesImportResult {
   const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim().length > 0);
   if (lines.length < 2) return { logs: [], rowCount: 0, dayCount: 0, exerciseCount: 0 };
@@ -77,7 +71,6 @@ export function parseFitNotesCsv(text: string): FitNotesImportResult {
     return { logs: [], rowCount: 0, dayCount: 0, exerciseCount: 0 };
   }
 
-  // date -> ordered exercises -> exercise aggregate
   const byDate = new Map<string, Map<string, WorkoutLogExercise>>();
   let rowCount = 0;
 
@@ -95,7 +88,6 @@ export function parseFitNotesCsv(text: string): FitNotesImportResult {
     const duration = idx.time !== -1 ? timeToSeconds(f[idx.time] || "") : 0;
     const notes = idx.notes !== -1 ? (f[idx.notes] || "").trim() : "";
 
-    // Skip placeholder/empty sets (FitNotes sometimes exports 1lb×0 stubs).
     if (weight <= 1 && reps <= 0 && distance <= 0 && duration <= 0) continue;
 
     const type: ExerciseType = distance > 0 || duration > 0 ? "cardio" : weight > 0 ? "weighted" : "bodyweight";

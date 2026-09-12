@@ -12,7 +12,10 @@ export type HapticDuration = "short" | "normal" | "long";
 export type NavPosition = "bottom" | "top";
 export type NavMode = "tabs" | "fab";
 export type Handedness = "left" | "right";
-export type QuickAction = "plan" | "workout" | "log" | "chat";
+export type MapStyle = "standard" | "light" | "dark";
+export type QuickAction = "dashboard" | "menu" | "plan" | "today" | "chat" | "progress" | "workout" | "log";
+export const QUICK_ACTION_KEYS: QuickAction[] = ["dashboard", "menu", "plan", "today", "chat", "progress", "workout", "log"];
+export type StartPage = "dashboard" | "today" | "menu" | "plan" | "log" | "workout" | "chat";
 export type WorkoutCardMode = "notebook" | "focus";
 export type ShapeMotif =
   | "none" | "blobs" | "leaves" | "dumbbells" | "koalas" | "huskies"
@@ -20,20 +23,20 @@ export type ShapeMotif =
   | "waves" | "mountains" | "rainy" | "flowers";
 
 export interface Customize {
-  accent: string;        // hex, e.g. "#6c5cf2"
+  accent: string;
   bgStyle: BgStyle;
-  bgPreset: string;      // id from BG_PRESETS (used when bgStyle === "preset")
-  bgImageUrl: string;    // image URL (used when bgStyle === "image")
-  bgImageDim: number;    // 0–80 — contrast scrim over the photo, as %
+  bgPreset: string;
+  bgImageUrl: string;
+  bgImageDim: number;
   glow: GlowLevel;
-  blur: number;          // glass blur in px (0–34)
-  shapeMotif: ShapeMotif; // themed decorations behind the app
-  autoNight: boolean;    // data-adaptive warm/dim tone after dark
-  highContrast: boolean; // boost text + panel contrast for accessibility
-  corners: CornerStyle;  // global corner roundness for surfaces & inputs
-  panel: PanelStyle;     // glass / solid / bordered surface treatment
-  pageAnim: PageAnim;    // tab/page transition animation
-  reduceMotion: boolean; // calm mode — disable animations & transitions
+  blur: number;
+  shapeMotif: ShapeMotif;
+  autoNight: boolean;
+  highContrast: boolean;
+  corners: CornerStyle;
+  panel: PanelStyle;
+  pageAnim: PageAnim;
+  reduceMotion: boolean;
   navSize: NavSize;
   navLabels: boolean;
   fabShape: FabShape;
@@ -44,8 +47,16 @@ export interface Customize {
   navPosition: NavPosition;
   navMode: NavMode;
   handedness: Handedness;
+  showReachShortcut: boolean;
+  mapStyle: MapStyle;
   primaryAction: QuickAction;
   secondaryAction: QuickAction;
+  startPage: StartPage;
+  homeHidden: string[];
+  homeOrder: string[];
+  navHidden: string[];
+  plannerBudgetCap: number | null;
+  todayFullMap: boolean;
   workoutCardMode: WorkoutCardMode;
   autoFocusMode: boolean;
   workoutOled: boolean;
@@ -79,15 +90,22 @@ export const DEFAULT_CUSTOMIZE: Customize = {
   navPosition: "bottom",
   navMode: "fab",
   handedness: "right",
+  showReachShortcut: true,
+  mapStyle: "standard",
   primaryAction: "plan",
   secondaryAction: "log",
+  startPage: "dashboard",
+  homeHidden: [],
+  homeOrder: [],
+  navHidden: [],
+  plannerBudgetCap: null,
+  todayFullMap: false,
   workoutCardMode: "notebook",
   autoFocusMode: true,
   workoutOled: false,
   restAlerts: true,
 };
 
-/** Calming, theme-adaptive gradient presets (translucent over --bg-base). */
 export interface BgPreset { id: string; name: string; swatch: string; gradient: string; }
 export const BG_PRESETS: BgPreset[] = [
   { id: "ocean", name: "Calm Ocean", swatch: "linear-gradient(135deg,#60a5fa,#22d3ee)",
@@ -110,7 +128,6 @@ export const BG_PRESETS: BgPreset[] = [
     gradient: "linear-gradient(160deg, rgba(254,215,170,0.36), transparent 60%), radial-gradient(85% 55% at 0% 100%, rgba(254,202,202,0.26), transparent 60%)" },
 ];
 
-/** Themed background decorations. Emoji glyphs scatter behind the app. */
 export const SHAPE_MOTIFS: { id: ShapeMotif; label: string; emoji: string; glyphs: string[] }[] = [
   { id: "none",      label: "None",    emoji: "⊘",  glyphs: [] },
   { id: "blobs",     label: "Blobs",   emoji: "🔮", glyphs: [] },
@@ -136,7 +153,6 @@ export function getBgPreset(id: string): BgPreset {
   return BG_PRESETS.find((p) => p.id === id) ?? BG_PRESETS[0];
 }
 
-/** Accept only http(s) or data image URLs, and reject characters that would break url(). */
 export function isValidImageUrl(value: string): boolean {
   const v = value.trim();
   if (!v || /["'()\\]/.test(v) || /[\n\r]/.test(v)) return false;
@@ -157,8 +173,6 @@ export const ACCENT_PRESETS: { name: string; hex: string }[] = [
   { name: "Fuchsia", hex: "#c026d3" },
   { name: "Slate", hex: "#475569" },
 ];
-
-/* ── color helpers ─────────────────────────────────────────────── */
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
@@ -219,8 +233,6 @@ export interface ComputedCustomize {
   attrs: Record<string, string>;
 }
 
-// Every CSS var the customizer may set. Anything here that isn't produced for
-// the current settings gets removed, so the tuned default theme shows through.
 export const MANAGED_VARS = [
   "--accent", "--accent-strong", "--accent-ink", "--accent-soft", "--accent-contrast",
   "--fab", "--fab-ink", "--hero-from", "--hero-to", "--hero-ink",
@@ -228,18 +240,12 @@ export const MANAGED_VARS = [
   "--custom-bg-a", "--custom-bg-b", "--bg-gradient", "--bg-url", "--bg-dim",
 ] as const;
 
-/**
- * Turn settings into a flat CSS-variable + data-attribute map (theme-independent).
- * Accent/glow/blur tokens are only emitted when the user has actually changed
- * them from the defaults, so an un-customized app keeps its hand-tuned theme.
- */
 export function computeCustomize(c: Customize): ComputedCustomize {
   const a = isValidHex(c.accent) ? normalizeHex(c.accent) : DEFAULT_ACCENT;
   const contrast = luminance(a) > 0.62 ? "#14161d" : "#ffffff";
   const [g1, g2] = GLOW_ALPHA[c.glow] ?? GLOW_ALPHA.medium;
 
   const vars: Record<string, string> = {
-    // Always available — only referenced by non-default backgrounds / shapes.
     "--custom-bg-a": rgba(a, 0.16),
     "--custom-bg-b": rgba(mix(a, "#000000", 0.3), 0.1),
   };
@@ -279,7 +285,6 @@ export function computeCustomize(c: Customize): ComputedCustomize {
     vars["--bg-dim"] = `rgba(var(--scrim-rgb), ${(clamp(c.bgImageDim, 0, 80) / 100).toFixed(2)})`;
   }
 
-  // A photo background with no valid URL falls back to the plain base canvas.
   const effectiveBg = c.bgStyle === "image" && !isValidImageUrl(c.bgImageUrl) ? "solid" : c.bgStyle;
 
   const attrs: Record<string, string> = {
@@ -295,6 +300,7 @@ export function computeCustomize(c: Customize): ComputedCustomize {
     "data-haptic": c.hapticLevel,
     "data-haptic-duration": c.hapticDuration,
     "data-workout-oled": c.workoutOled ? "on" : "off",
+    "data-map": c.mapStyle,
   };
 
   return { vars, attrs };
@@ -303,7 +309,6 @@ export function computeCustomize(c: Customize): ComputedCustomize {
 export function parseCustomize(raw: unknown): Customize {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_CUSTOMIZE };
   const v = raw as Partial<Customize> & { shapes?: boolean };
-  // Migrate the old boolean `shapes` flag → motif.
   const motif = SHAPE_MOTIF_IDS.includes(v.shapeMotif as ShapeMotif)
     ? (v.shapeMotif as ShapeMotif)
     : typeof v.shapes === "boolean"
@@ -334,8 +339,19 @@ export function parseCustomize(raw: unknown): Customize {
     navPosition: (["bottom", "top"] as NavPosition[]).includes(v.navPosition as NavPosition) ? (v.navPosition as NavPosition) : DEFAULT_CUSTOMIZE.navPosition,
     navMode: (["tabs", "fab"] as NavMode[]).includes(v.navMode as NavMode) ? (v.navMode as NavMode) : DEFAULT_CUSTOMIZE.navMode,
     handedness: (["left", "right"] as Handedness[]).includes(v.handedness as Handedness) ? (v.handedness as Handedness) : DEFAULT_CUSTOMIZE.handedness,
-    primaryAction: (["plan", "workout", "log", "chat"] as QuickAction[]).includes(v.primaryAction as QuickAction) ? (v.primaryAction as QuickAction) : DEFAULT_CUSTOMIZE.primaryAction,
-    secondaryAction: (["plan", "workout", "log", "chat"] as QuickAction[]).includes(v.secondaryAction as QuickAction) ? (v.secondaryAction as QuickAction) : DEFAULT_CUSTOMIZE.secondaryAction,
+    showReachShortcut: typeof v.showReachShortcut === "boolean" ? v.showReachShortcut : DEFAULT_CUSTOMIZE.showReachShortcut,
+    mapStyle: (["standard", "light", "dark"] as MapStyle[]).includes(v.mapStyle as MapStyle) ? (v.mapStyle as MapStyle) : DEFAULT_CUSTOMIZE.mapStyle,
+    primaryAction: QUICK_ACTION_KEYS.includes(v.primaryAction as QuickAction) ? (v.primaryAction as QuickAction) : DEFAULT_CUSTOMIZE.primaryAction,
+    secondaryAction: QUICK_ACTION_KEYS.includes(v.secondaryAction as QuickAction) ? (v.secondaryAction as QuickAction) : DEFAULT_CUSTOMIZE.secondaryAction,
+    startPage: (["dashboard", "today", "menu", "plan", "log", "workout", "chat"] as StartPage[]).includes(v.startPage as StartPage) ? (v.startPage as StartPage) : DEFAULT_CUSTOMIZE.startPage,
+    homeHidden: Array.isArray(v.homeHidden) ? v.homeHidden.filter((x): x is string => typeof x === "string").slice(0, 40) : [],
+    homeOrder: Array.isArray(v.homeOrder) ? v.homeOrder.filter((x): x is string => typeof x === "string").slice(0, 40) : [],
+    navHidden: Array.isArray(v.navHidden) ? v.navHidden.filter((x): x is QuickAction => QUICK_ACTION_KEYS.includes(x as QuickAction)) : [],
+    plannerBudgetCap:
+      typeof v.plannerBudgetCap === "number" && Number.isFinite(v.plannerBudgetCap) && v.plannerBudgetCap >= 3 && v.plannerBudgetCap <= 500
+        ? Math.round(v.plannerBudgetCap * 100) / 100
+        : null,
+    todayFullMap: typeof v.todayFullMap === "boolean" ? v.todayFullMap : DEFAULT_CUSTOMIZE.todayFullMap,
     workoutCardMode: (["notebook", "focus"] as WorkoutCardMode[]).includes(v.workoutCardMode as WorkoutCardMode) ? (v.workoutCardMode as WorkoutCardMode) : DEFAULT_CUSTOMIZE.workoutCardMode,
     autoFocusMode: typeof v.autoFocusMode === "boolean" ? v.autoFocusMode : DEFAULT_CUSTOMIZE.autoFocusMode,
     workoutOled: typeof v.workoutOled === "boolean" ? v.workoutOled : DEFAULT_CUSTOMIZE.workoutOled,

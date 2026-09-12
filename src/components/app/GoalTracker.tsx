@@ -194,7 +194,6 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
               </div>
             )}
 
-            {/* Ask the AI a specific question about reaching this goal */}
             <div className="mt-3">
               <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-ink-faint">
                 <Sparkles className="size-3" /> Ask about your goal
@@ -210,7 +209,7 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
                   type="submit"
                   disabled={asking || question.trim().length < 3}
                   aria-label="Ask"
-                  className="press grid size-9 shrink-0 place-items-center rounded-[12px] bg-accent text-accent-contrast disabled:opacity-50"
+                  className="press ui-tile grid size-9 shrink-0 place-items-center bg-accent text-accent-contrast disabled:opacity-50"
                 >
                   <Send className="size-4" />
                 </button>
@@ -229,7 +228,6 @@ Answer specifically using their numbers above. Be encouraging and concrete (calo
   );
 }
 
-// Renders AI text with **bold** and "- " bullets, like the chat tab.
 function FormattedAnswer({ content }: { content: string }) {
   const lines = content.split("\n").map((l) => l.trim()).filter(Boolean);
   return (

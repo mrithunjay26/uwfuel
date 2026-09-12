@@ -1,12 +1,10 @@
 import {
   get,
-  push,
+  push as mintRef,
   ref,
-  remove,
-  set,
-  update,
   type Database,
 } from "firebase/database";
+import { push, remove, set, update } from "@/lib/offline/writes";
 import { PATHS } from "@/lib/db/paths";
 import type {
   ActivePlan,
@@ -21,6 +19,7 @@ import type {
   PantryItem,
   OnboardingProfile,
   ReadinessCheck,
+  SavedPlace,
   UserProfile,
   WeightEntry,
   WorkoutLog,
@@ -91,7 +90,9 @@ export async function logFoodItem(
       description: payload.name,
       linked_log_id: newRef.key,
     } satisfies FoodExpense);
-    if (expenseRef.key) await update(newRef, { expense_id: expenseRef.key });
+    if (expenseRef.key) {
+      await update(ref(db, PATHS.logEntry(uid, dateKey, newRef.key)), { expense_id: expenseRef.key });
+    }
   }
   return newRef.key;
 }
@@ -229,8 +230,6 @@ export async function updateInventoryFood(
   await update(ref(db, PATHS.inventoryItem(uid, id)), patch);
 }
 
-/* ── Dorm pantry & kitchen ──────────────────────────────────────────── */
-
 export async function writeKitchenProfile(
   db: Database,
   uid: string,
@@ -296,6 +295,12 @@ export async function deletePlanFromRepo(
   await remove(ref(db, PATHS.planEntry(uid, dateKey, planId)));
 }
 
+export function newPlanId(db: Database, uid: string, dateKey: string): string {
+  const key = mintRef(ref(db, PATHS.dayPlanRepo(uid, dateKey))).key;
+  if (!key) throw new Error("Couldn't create a plan id.");
+  return key;
+}
+
 export async function setActivePlan(
   db: Database,
   uid: string,
@@ -333,6 +338,21 @@ export async function getClassSchedule(
 ): Promise<ClassSchedule | null> {
   const snap = await get(ref(db, PATHS.classSchedule(uid)));
   return snap.exists() ? (snap.val() as ClassSchedule) : null;
+}
+
+export async function saveSavedPlace(
+  db: Database,
+  uid: string,
+  place: Omit<SavedPlace, "added_at">,
+): Promise<string> {
+  const payload: SavedPlace = { ...place, added_at: nowIso() };
+  const newRef = await push(ref(db, PATHS.savedPlaces(uid)), payload);
+  if (!newRef.key) throw new Error("Firebase push returned no key.");
+  return newRef.key;
+}
+
+export async function deleteSavedPlace(db: Database, uid: string, id: string): Promise<void> {
+  await remove(ref(db, PATHS.savedPlace(uid, id)));
 }
 
 function deriveChatTitle(firstMessage: string): string {

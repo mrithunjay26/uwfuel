@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   BookOpen,
   CalendarDays,
-  Camera,
   ChevronRight,
   Code2,
   Database,
@@ -49,7 +48,6 @@ export default function ProfilePage() {
   const { user, signOut } = useAuth();
   const {
     cohereKey, hasCohere, setCohereKey,
-    groqKey, hasGroq, setGroqKey,
     firebase, hasFirebase, setFirebase,
     showWorkoutTabs, setShowWorkoutTabs,
   } = useConfig();
@@ -57,15 +55,25 @@ export default function ProfilePage() {
   const { schedule: classSchedule, todayStops } = useClassSchedule();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [dbExpanded, setDbExpanded] = useState(false);
-  const [groqExpanded, setGroqExpanded] = useState(false);
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [fitnotesOpen, setFitnotesOpen] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  async function forgetSecret(run: () => Promise<void>) {
+    setConfigError(null);
+    try {
+      await run();
+      haptic("success");
+    } catch (cause) {
+      setConfigError(cause instanceof Error ? cause.message : "That didn't save. Try again.");
+      haptic("error");
+    }
+  }
 
   const name = user?.displayName || "Husky Student";
   const email = user?.email || "";
   const initials = (name || email || "U").slice(0, 1).toUpperCase();
   const maskedKey = cohereKey ? `co-••••${cohereKey.slice(-4)}` : null;
-  const maskedGroq = groqKey ? `gsk_••••${groqKey.slice(-4)}` : null;
   const dbHost = firebase?.databaseURL?.replace(/^https?:\/\//, "").replace(/\/$/, "") || "";
 
   const totalStops = classSchedule
@@ -98,7 +106,7 @@ export default function ProfilePage() {
       <div className="flex flex-col gap-3 px-5 pt-5">
 
         <Link href="/setup" className="press glass-panel flex items-center gap-3 rounded-[20px] p-4">
-          <span className="grid size-10 place-items-center rounded-[14px] bg-accent-soft text-accent"><WalletCards className="size-5" /></span>
+          <span className="ui-tile grid size-10 place-items-center bg-accent-soft text-accent"><WalletCards className="size-5" /></span>
           <span className="min-w-0 flex-1"><span className="block font-display text-[15px] font-bold text-ink">Everyday setup &amp; food wallets</span><span className="block text-[11px] text-ink-soft">Dining Plan, personal budget, cooking access, and food rules</span></span>
           <ChevronRight className="size-4 text-ink-faint" />
         </Link>
@@ -129,17 +137,18 @@ export default function ProfilePage() {
                 Your meals &amp; goals live in <b className="font-semibold text-ink">your</b> Firebase project.
               </p>
               <button
-                onClick={() => { setFirebase(null); }}
+                onClick={() => forgetSecret(() => setFirebase(null))}
                 className="mt-2 text-[12px] font-semibold text-danger"
               >
-                Disconnect personal DB
+                Disconnect my database
               </button>
+              {configError && <p className="mt-2 text-[12px] font-semibold text-danger">{configError}</p>}
             </div>
           ) : (
             <>
               <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
-                Using the shared UW Fuel database. Your data is isolated under your account.
-                Optionally connect your own Firebase project for full data ownership.
+                Your data sits in the shared UW Fuel database, in a folder only your account can open.
+                Want to own it outright? Connect your own Firebase instead.
               </p>
               <button
                 onClick={() => setDbExpanded(!dbExpanded)}
@@ -152,8 +161,7 @@ export default function ProfilePage() {
                 <div className="mt-3">
                   <ConnectDatabaseForm
                     ctaLabel="Connect & use my project"
-                    onConnected={(cfg) => {
-                      setFirebase(cfg);
+                    onConnected={() => {
                       setDbExpanded(false);
                       haptic("success");
                     }}
@@ -226,62 +234,17 @@ export default function ProfilePage() {
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <p className="text-[12px] text-ink-soft">Stored on this device only.</p>
-                <button onClick={() => setCohereKey(null)} className="text-[12px] font-semibold text-danger">
+                <p className="text-[12px] text-ink-soft">Encrypted, saved to your account.</p>
+                <button onClick={() => forgetSecret(() => setCohereKey(null))} className="text-[12px] font-semibold text-danger">
                   Remove
                 </button>
               </div>
+              {configError && <p className="mt-2 text-[12px] font-semibold text-danger">{configError}</p>}
             </>
           ) : (
             <p className="mt-2.5 text-[12px] leading-relaxed text-ink-soft">
               No AI key yet. Add your Cohere key to enable the chatbot and meal planner.
             </p>
-          )}
-        </section>
-
-        <section className="glass-panel rounded-[20px] p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Camera className="size-[18px] text-accent" />
-              <h2 className="font-display text-[15px] font-bold text-ink">Meal scanner key (Groq)</h2>
-            </div>
-            <button
-              onClick={() => setGroqExpanded((v) => !v)}
-              className="text-[12px] font-bold text-accent-ink"
-            >
-              {groqExpanded ? "Close" : hasGroq ? "Replace" : "Add"}
-            </button>
-          </div>
-
-          {hasGroq && !groqExpanded ? (
-            <>
-              <div className="mt-3 flex items-center gap-2 text-[13px]">
-                <KeyRound className="size-4 text-accent" />
-                <span className="text-ink-soft">
-                  Groq key saved · <b className="font-semibold text-ink">{maskedGroq}</b>
-                </span>
-              </div>
-              <div className="mt-2 flex items-center justify-between">
-                <p className="text-[12px] text-ink-soft">Free backup for photo &amp; text scanning.</p>
-                <button onClick={() => setGroqKey(null)} className="text-[12px] font-semibold text-danger">
-                  Remove
-                </button>
-              </div>
-            </>
-          ) : !groqExpanded ? (
-            <p className="mt-2.5 text-[12px] leading-relaxed text-ink-soft">
-              Optional. A <b className="font-semibold text-ink">free</b> Groq key powers the meal
-              scanner when your Cohere key isn&apos;t set or is busy — so scanning always works.
-            </p>
-          ) : (
-            <div className="mt-3">
-              <ConnectAIForm
-                provider="groq"
-                allowSkip={false}
-                saveLabel={hasGroq ? "Update Groq key" : "Save Groq key"}
-                onSaved={() => setGroqExpanded(false)}
-              />
-            </div>
           )}
         </section>
 
@@ -376,7 +339,6 @@ const KITCHEN_ACCESS: { v: KitchenAccess; label: string }[] = [
   { v: "full", label: "Full kitchen" },
 ];
 
-/** Dorm-kitchen access + appliances. This is what the pantry recipe finder filters against. */
 function KitchenSection() {
   const handle = useUserDb();
   const { kitchen } = useKitchen();
@@ -409,7 +371,7 @@ function KitchenSection() {
   return (
     <section className="glass-panel rounded-[20px] p-4">
       <div className="flex items-center gap-2">
-        <span className="grid size-9 place-items-center rounded-[12px] bg-accent-soft text-accent"><Utensils className="size-[18px]" /></span>
+        <span className="ui-tile grid size-9 place-items-center bg-accent-soft text-accent"><Utensils className="size-[18px]" /></span>
         <div>
           <h2 className="font-display text-[15px] font-bold text-ink">Dorm kitchen</h2>
           <p className="text-[11px] text-ink-soft">Powers the pantry recipe finder in the Dining tab.</p>

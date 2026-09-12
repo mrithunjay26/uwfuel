@@ -40,6 +40,7 @@ import { bodyPartFromName, resolveBodyPart, colorForBodyPart, BODY_PART_COLORS, 
 import { buildExerciseStats, searchExercises, relDaysLabel as relDays } from "@/lib/workout/exerciseSearch";
 import { loggerExercisesFromPlan, workoutDayForDate } from "@/lib/workout/plans";
 import { haptic } from "@/lib/utils/haptics";
+import { computePrIndex, countPrs, prKey, PR_LABEL, type PrKind } from "@/lib/workout/prs";
 import type { ExerciseType, LoggedSet, WorkoutLogExercise, WorkoutLogItem, WorkoutPlanDay } from "@/lib/db/types";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -68,11 +69,8 @@ function prettyDate(key: string, opts?: Intl.DateTimeFormatOptions) {
 const exVolume = (ex: WorkoutLogExercise) => (ex.sets ?? []).reduce((s, st) => s + st.weight * st.reps, 0);
 const logVolume = (l: WorkoutLogItem) => (l.exercises ?? []).reduce((s, ex) => s + exVolume(ex), 0);
 function bigNum(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${Math.round(n)}`; }
-// Epley estimated one-rep max — lets us detect rep PRs (more reps at a given weight), not just heaviest lifts.
 const e1rm = (w: number, r: number) => (w > 0 && r > 0 ? w * (1 + r / 30) : 0);
 
-// Lightweight fuzzy matcher: exact substrings score highest, then subsequence
-// matches with word-start & streak bonuses. Returns -1 when there's no match.
 type Tab = "today" | "calendar" | "records" | "charts";
 
 export default function WorkoutLogPage() {
@@ -103,6 +101,8 @@ export default function WorkoutLogPage() {
     return map;
   }, [logs]);
 
+  const prIndex = useMemo(() => computePrIndex(logs), [logs]);
+
   const directory = useMemo(() => {
     const names = new Set<string>();
     fbExercises.forEach((e) => names.add(e.name));
@@ -114,7 +114,6 @@ export default function WorkoutLogPage() {
     const map: Record<string, string> = {};
     fbExercises.forEach((e) => {
       const n = norm(e.name);
-      // Prefer the DB's specific muscle_group, then body_part, then infer from the name.
       if (n) map[n] = resolveBodyPart(e.name, [e.muscle_group, e.body_part]);
     });
     return map;
@@ -177,6 +176,7 @@ export default function WorkoutLogPage() {
           <CalendarTab
             logsByDate={logsByDate}
             logs={logs}
+            prIndex={prIndex}
             today={today}
             selectedDate={selectedDate}
             onSelectDate={(d) => setSelectedDate(d)}
@@ -185,8 +185,8 @@ export default function WorkoutLogPage() {
             onDelete={async (id) => { if (handle) await deleteWorkoutLog(handle.db, handle.uid, id).catch(() => {}); }}
           />
         )}
-        {tab === "records" && <RecordsTab logs={logs} directory={directory} focusName={recordsExercise} onConsumeFocus={() => setRecordsExercise(null)} />}
-        {tab === "charts" && <ChartsTab logs={logs} muscleByName={muscleByName} today={today} />}
+        {tab === "records" && <RecordsTab logs={logs} prIndex={prIndex} directory={directory} focusName={recordsExercise} onConsumeFocus={() => setRecordsExercise(null)} />}
+        {tab === "charts" && <ChartsTab logs={logs} prIndex={prIndex} muscleByName={muscleByName} today={today} />}
       </div>
     </div>
   );
@@ -231,9 +231,6 @@ function TodayTab({
     return () => root.removeAttribute("data-workout-focus");
   }, [focusActive]);
 
-  // The workout logs load asynchronously, so on the first open of a day `existing`
-  // is often undefined and the tab seeds empty. Adopt the saved log once it
-  // arrives — but only while there are no local edits, so we never clobber.
   useEffect(() => {
     if (existing) {
       setExercises(clone(existing.exercises));
@@ -243,51 +240,28 @@ function TodayTab({
     if (logId === null && exercises.length === 0) {
       setExercises(scheduledDay && !scheduledDay.is_rest ? loggerExercisesFromPlan(scheduledDay) : []);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, existing?.id, scheduledDay?.weekday, scheduledDay?.label]);
 
-  // Best prior numbers for an exercise (everything logged before this day, this log excluded).
-  function priorStats(name: string) {
-    let maxWeight = 0, maxE1rm = 0, maxReps0 = 0;
+  function priorMax(name: string): number {
+    let maxWeight = 0;
     for (const l of allLogs) {
       if (l.id === logId || l.date >= date) continue;
       for (const ex of l.exercises) {
         if (norm(ex.name) !== norm(name)) continue;
-        for (const s of ex.sets) {
-          if (s.weight > maxWeight) maxWeight = s.weight;
-          const e = e1rm(s.weight, s.reps);
-          if (e > maxE1rm) maxE1rm = e;
-          if (s.weight === 0 && s.reps > maxReps0) maxReps0 = s.reps;
-        }
+        for (const s of ex.sets) if (s.weight > maxWeight) maxWeight = s.weight;
       }
     }
-    return { maxWeight, maxE1rm, maxReps0 };
+    return maxWeight;
   }
-  const priorMax = (name: string) => priorStats(name).maxWeight;
   const muscleFor = (name: string) => muscleByName[norm(name)] || bodyPartFromName(name);
 
-  // A set is a PR only when it's a genuine max: heaviest weight ever, best estimated
-  // 1RM ever (catches "more reps at the same weight"), or a bodyweight rep max.
-  function withPRs(list: WorkoutLogExercise[]): WorkoutLogExercise[] {
+  function normalizeExercises(list: WorkoutLogExercise[]): WorkoutLogExercise[] {
     return list.map((ex) => {
-      const stats = priorStats(ex.name);
-      let { maxWeight, maxE1rm, maxReps0 } = stats;
       const muscle = ex.muscle || muscleFor(ex.name);
       const sets = (ex.sets ?? []).map((s) => {
-        const w = s.weight, r = s.reps;
-        const e = e1rm(w, r);
-        let isPr = false;
-        if (r > 0) {
-          if (w > 0 && w > maxWeight + 1e-6) isPr = true;
-          else if (w > 0 && e > maxE1rm + 1e-6) isPr = true;
-          else if (w === 0 && r > maxReps0) isPr = true;
-        }
-        if (w > maxWeight) maxWeight = w;
-        if (e > maxE1rm) maxE1rm = e;
-        if (w === 0 && r > maxReps0) maxReps0 = r;
-        const { is_pr: _was, ...rest } = s; // recompute PR, keep comment/distance/duration
-        void _was;
-        return { ...rest, weight: w, reps: r, ...(isPr ? { is_pr: true } : {}) };
+        const { is_pr: _legacy, ...rest } = s;
+        void _legacy;
+        return rest;
       });
       return {
         name: ex.name,
@@ -300,7 +274,16 @@ function TodayTab({
     });
   }
 
-  // Opening an exercise straight from the calendar.
+  const draftCreatedAt = useRef(existing?.created_at ?? new Date().toISOString());
+  const draftPrs = useMemo(() => {
+    const draftId = logId ?? "__draft__";
+    const index = computePrIndex([
+      ...allLogs.filter((l) => l.id !== logId),
+      { id: draftId, date, created_at: existing?.created_at ?? draftCreatedAt.current, exercises },
+    ]);
+    return (xi: number, si: number): PrKind | null => index.get(prKey(draftId, xi, si)) ?? null;
+  }, [allLogs, logId, date, exercises, existing?.created_at]);
+
   useEffect(() => {
     if (!focusExercise) return;
     const idx = exercises.findIndex((e) => norm(e.name) === norm(focusExercise));
@@ -309,11 +292,10 @@ function TodayTab({
       requestAnimationFrame(() => entryRefs.current[idx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
     }
     onConsumeFocus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusExercise]);
 
   async function persist(next: WorkoutLogExercise[]) {
-    const flagged = withPRs(next);
+    const flagged = normalizeExercises(next);
     setExercises(flagged);
     if (!handle) return;
     try {
@@ -340,7 +322,6 @@ function TodayTab({
     setCustomType("weighted");
   }
 
-  // Most recent prior session's sets for an exercise (for the "Previous" reference).
   function prevSetsFor(name: string): LoggedSet[] {
     let best: { date: string; sets: LoggedSet[] } | null = null;
     for (const l of allLogs) {
@@ -367,11 +348,8 @@ function TodayTab({
     setOpenEx(null);
   }
 
-  // How often / how recently each exercise has been done (across all logs).
   const exerciseStats = useMemo(() => buildExerciseStats(allLogs), [allLogs]);
 
-  // Search matrix: previously-done exercises rank first (with recency + count),
-  // fuzzy-matched so half-remembered names still surface.
   const pickerResults = useMemo(
     () => searchExercises(directory, exerciseStats, pickerSearch),
     [directory, exerciseStats, pickerSearch],
@@ -424,6 +402,7 @@ function TodayTab({
         <div key={i} ref={(el) => { entryRefs.current[i] = el; }}>
           <ExerciseEntry
             exercise={ex}
+            prKinds={(ex.sets ?? []).map((_, si) => draftPrs(i, si))}
             priorMax={priorMax(ex.name)}
             prevSets={prevSetsFor(ex.name)}
             open={openEx === i}
@@ -557,9 +536,10 @@ function fmtSet(s: LoggedSet, type: ExerciseType): string {
 }
 
 function ExerciseEntry({
-  exercise, priorMax, prevSets, open, onToggle, onRemove, onSets, onViewRecords, dense, restAlerts,
+  exercise, prKinds, priorMax, prevSets, open, onToggle, onRemove, onSets, onViewRecords, dense, restAlerts,
 }: {
   exercise: WorkoutLogExercise;
+  prKinds: (PrKind | null)[];
   priorMax: number;
   prevSets: LoggedSet[];
   open: boolean;
@@ -582,7 +562,6 @@ function ExerciseEntry({
   const [rest, setRest] = useState<number | null>(null);
   const expanded = dense || open;
 
-  // Rest countdown between sets.
   useEffect(() => {
     if (rest == null) return;
     const id = window.setTimeout(() => setRest((current) => {
@@ -617,7 +596,7 @@ function ExerciseEntry({
       setEditIdx(null);
     } else {
       onSets([...exercise.sets, set]);
-      setRest(REST_DEFAULT); // FitNotes-style rest timer after each new set
+      setRest(REST_DEFAULT);
       haptic("medium");
     }
     setComment("");
@@ -630,7 +609,7 @@ function ExerciseEntry({
   function editSet(i: number) { fillFrom(exercise.sets[i]); setComment(exercise.sets[i].comment ?? ""); setEditIdx(i); }
   function delSet(i: number) { onSets(exercise.sets.filter((_, idx) => idx !== i)); if (editIdx === i) setEditIdx(null); }
 
-  const hasPR = exercise.sets.some((s) => s.is_pr);
+  const hasPR = prKinds.some(Boolean);
   const setCount = exercise.sets.length;
   const summary = `${setCount} set${setCount === 1 ? "" : "s"}${setCount && type !== "cardio" ? ` · ${exVolume(exercise).toLocaleString()} lb` : ""}`;
 
@@ -653,7 +632,7 @@ function ExerciseEntry({
       {!expanded && setCount > 0 && (
         <div className="flex flex-wrap gap-1.5 px-4 pb-3">
           {exercise.sets.map((s, i) => (
-            <span key={i} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${s.is_pr ? "bg-warning/15 text-warning" : "bg-surface-2 text-ink-soft"}`}>
+            <span key={i} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${prKinds[i] ? "bg-warning/15 text-warning" : "bg-surface-2 text-ink-soft"}`}>
               {fmtSet(s, type)}
             </span>
           ))}
@@ -737,7 +716,7 @@ function ExerciseEntry({
               {exercise.sets.map((s, i) => (
                 <div key={i} className={`flex items-center gap-3 rounded-[10px] px-3 py-2 ${editIdx === i ? "bg-accent-soft" : "bg-surface-2"}`}>
                   <span className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-3 text-[11px] font-bold text-ink-soft">{i + 1}</span>
-                  {s.is_pr && <Star className="size-4 shrink-0 fill-warning text-warning" />}
+                  {prKinds[i] && <PrBadge kind={prKinds[i] as PrKind} />}
                   <button onClick={() => editSet(i)} className="flex min-w-0 flex-1 flex-col text-left">
                     <span className="text-[14px] font-bold text-ink">{fmtSet(s, type)}</span>
                     {s.comment && <span className="truncate text-[10px] text-ink-faint">{s.comment}</span>}
@@ -753,13 +732,21 @@ function ExerciseEntry({
   );
 }
 
+type RecordSet = LoggedSet & { pr: PrKind | null };
+
+function PrBadge({ kind }: { kind: PrKind }) {
+  return (
+    <span title={PR_LABEL[kind]} className="flex shrink-0 items-center gap-0.5 text-[10px] font-bold text-warning">
+      <Star className="size-3.5 fill-warning text-warning" />
+      {kind === "weight" ? "Weight" : "Reps"}
+    </span>
+  );
+}
+
 function Stepper({ label, value, step, min, onChange }: { label: string; value: number; step: number; min: number; onChange: (v: number) => void }) {
-  // Local text state so the field can be cleared / typed freely (incl. 0 and
-  // trailing decimals) without being snapped back to a forced value.
   const [text, setText] = useState(String(value));
   useEffect(() => {
     if (parseFloat(text) !== value) setText(value === 0 ? "0" : String(value));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   return (
@@ -813,10 +800,11 @@ function Stat({ icon, label, value, unit }: { icon: React.ReactNode; label: stri
 }
 
 function CalendarTab({
-  logsByDate, logs, today, selectedDate, onSelectDate, onOpenDate, onOpenExercise, onDelete,
+  logsByDate, logs, prIndex, today, selectedDate, onSelectDate, onOpenDate, onOpenExercise, onDelete,
 }: {
   logsByDate: Record<string, WorkoutLogItem[]>;
   logs: WorkoutLogItem[];
+  prIndex: Map<string, PrKind>;
   today: string;
   selectedDate: string;
   onSelectDate: (d: string) => void;
@@ -829,7 +817,7 @@ function CalendarTab({
   const monthPrefix = `${view.year}-${pad(view.month + 1)}`;
   const monthLogs = logs.filter((l) => l.date.startsWith(monthPrefix));
   const monthVolume = monthLogs.reduce((s, l) => s + logVolume(l), 0);
-  const monthPRs = monthLogs.reduce((s, l) => s + l.exercises.reduce((a, ex) => a + ex.sets.filter((st) => st.is_pr).length, 0), 0);
+  const monthPRs = countPrs(prIndex, monthLogs.map((l) => l.id));
   const dayLogs = logsByDate[selectedDate] ?? [];
 
   function shift(d: number) {
@@ -907,10 +895,17 @@ function CalendarTab({
                     <p className="flex items-center gap-1.5 text-[13px] font-bold text-ink">
                       <span className="truncate">{ex.name}</span>
                       {ex.muscle && <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-bold uppercase text-accent-ink">{ex.muscle}</span>}
-                      {ex.sets.some((s) => s.is_pr) && <Trophy className="size-3.5 shrink-0 text-warning" />}
+                      {ex.sets.some((_, si) => prIndex.has(prKey(log.id, xi, si))) && <Trophy className="size-3.5 shrink-0 text-warning" />}
                     </p>
                     <div className="mt-0.5 flex flex-wrap gap-1.5">
-                      {ex.sets.map((s, si) => <span key={si} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${s.is_pr ? "bg-warning/15 text-warning" : "bg-surface-3 text-ink-soft"}`}>{s.weight > 0 ? `${s.weight}×${s.reps}` : `${s.reps} reps`}</span>)}
+                      {ex.sets.map((s, si) => {
+                        const pr = prIndex.get(prKey(log.id, xi, si));
+                        return (
+                          <span key={si} title={pr ? PR_LABEL[pr] : undefined} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${pr ? "bg-warning/15 text-warning" : "bg-surface-3 text-ink-soft"}`}>
+                            {s.weight > 0 ? `${s.weight}×${s.reps}` : `${s.reps} reps`}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                   <ChevronRight className="size-4 shrink-0 text-ink-faint" />
@@ -924,8 +919,9 @@ function CalendarTab({
   );
 }
 
-function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
+function RecordsTab({ logs, prIndex, directory, focusName, onConsumeFocus }: {
   logs: WorkoutLogItem[];
+  prIndex: Map<string, PrKind>;
   directory: string[];
   focusName?: string | null;
   onConsumeFocus?: () => void;
@@ -933,10 +929,8 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
 
-  // Open a specific exercise's records when navigated from the logger.
   useEffect(() => {
     if (focusName) { setSelected(focusName); onConsumeFocus?.(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusName]);
 
   const loggedNames = useMemo(() => {
@@ -947,10 +941,13 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
 
   const byDate = useMemo(() => {
     if (!selected) return [];
-    const map: Record<string, LoggedSet[]> = {};
-    logs.forEach((l) => { const ex = l.exercises.find((e) => norm(e.name) === norm(selected)); if (ex?.sets.length) (map[l.date] ||= []).push(...ex.sets); });
+    const map: Record<string, RecordSet[]> = {};
+    logs.forEach((l) => l.exercises.forEach((ex, xi) => {
+      if (norm(ex.name) !== norm(selected) || !ex.sets.length) return;
+      (map[l.date] ||= []).push(...ex.sets.map((s, si) => ({ ...s, pr: prIndex.get(prKey(l.id, xi, si)) ?? null })));
+    }));
     return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [logs, selected]);
+  }, [logs, selected, prIndex]);
 
   const repMaxes = useMemo(() => {
     const all: { weight: number; reps: number; date: string }[] = [];
@@ -969,14 +966,13 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
 
   const chartData = useMemo(() => byDate.map(([, sets]) => Math.max(...sets.map((s) => s.weight), 0)).reverse(), [byDate]);
 
-  // e1RM per session (oldest → newest) for the trend line.
   const e1rmSeries = useMemo(
     () => byDate.map(([, sets]) => Math.max(...sets.map((s) => e1rm(s.weight, s.reps)), 0)).reverse(),
     [byDate],
   );
 
   const diagnostics = useMemo(() => {
-    const flat: LoggedSet[] = byDate.flatMap(([, sets]) => sets);
+    const flat: RecordSet[] = byDate.flatMap(([, sets]) => sets);
     if (flat.length === 0) return null;
     const sessions = byDate.length;
     const totalSets = flat.length;
@@ -986,8 +982,7 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
     const bestE1rm = Math.max(...flat.map((s) => e1rm(s.weight, s.reps)), 0);
     const weighted = flat.filter((s) => s.weight > 0);
     const avgWeight = weighted.length ? weighted.reduce((s, x) => s + x.weight, 0) / weighted.length : 0;
-    const prCount = flat.filter((s) => s.is_pr).length;
-    // trend: newest e1RM vs first recorded e1RM
+    const prCount = flat.filter((s) => s.pr).length;
     const valid = e1rmSeries.filter((v) => v > 0);
     let trendPct: number | null = null;
     if (valid.length >= 2 && valid[0] > 0) trendPct = ((valid[valid.length - 1] - valid[0]) / valid[0]) * 100;
@@ -1065,14 +1060,13 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
               <p className="mb-2 font-display text-[14px] font-extrabold text-ink">History</p>
               <div className="flex flex-col gap-2.5">
                 {byDate.map(([d, sets]) => {
-                  const best = Math.max(...sets.map((s) => s.weight), 0);
                   return (
                     <div key={d} className="glass-panel rounded-[16px] p-3.5">
                       <p className="mb-1.5 text-[12px] font-bold uppercase tracking-wide text-ink-soft">{prettyDate(d, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
                       <div className="flex flex-col gap-1">
                         {sets.map((s, i) => (
                           <div key={i} className="flex items-center justify-between rounded-[8px] bg-surface-2 px-3 py-1.5">
-                            <span className="flex items-center gap-2">{(s.is_pr || s.weight === best) && <Star className="size-3.5 fill-warning text-warning" />}<span className="text-[14px] font-bold text-ink">{s.weight.toFixed(1)}<span className="text-[11px] font-semibold text-ink-faint"> lb</span></span></span>
+                            <span className="flex items-center gap-2">{s.pr && <PrBadge kind={s.pr} />}<span className="text-[14px] font-bold text-ink">{s.weight.toFixed(1)}<span className="text-[11px] font-semibold text-ink-faint"> lb</span></span></span>
                             <span className="text-[14px] font-bold text-ink">{s.reps}<span className="text-[11px] font-semibold text-ink-faint"> reps</span></span>
                           </div>
                         ))}
@@ -1114,7 +1108,7 @@ function RecordsTab({ logs, directory, focusName, onConsumeFocus }: {
 
 type Range = "all" | "year" | "month" | "week";
 
-function ChartsTab({ logs, muscleByName, today }: { logs: WorkoutLogItem[]; muscleByName: Record<string, string>; today: string }) {
+function ChartsTab({ logs, prIndex, muscleByName, today }: { logs: WorkoutLogItem[]; prIndex: Map<string, PrKind>; muscleByName: Record<string, string>; today: string }) {
   const [range, setRange] = useState<Range>("all");
 
   const cutoff = useMemo(() => {
@@ -1138,19 +1132,19 @@ function ChartsTab({ logs, muscleByName, today }: { logs: WorkoutLogItem[]; musc
   const workoutsInRange = inRange.length;
 
   const metrics = useMemo(() => {
-    let sets = 0, reps = 0, prs = 0;
+    let sets = 0, reps = 0;
     const days = new Set<string>();
     inRange.forEach((l) => {
       days.add(l.date);
-      l.exercises.forEach((ex) => ex.sets.forEach((s) => { sets++; reps += s.reps; if (s.is_pr) prs++; }));
+      l.exercises.forEach((ex) => ex.sets.forEach((s) => { sets++; reps += s.reps; }));
     });
-    // workouts per week across the active span
+    const prs = countPrs(prIndex, inRange.map((l) => l.id));
     const span = inRange.length
       ? Math.max(1, (Date.parse(today) - Date.parse(inRange.reduce((m, l) => (l.date < m ? l.date : m), today))) / 86400000)
       : 1;
     const perWeek = (days.size / span) * 7;
     return { sets, reps, prs, perWeek, topMuscle: segments[0]?.label ?? "—" };
-  }, [inRange, today, segments]);
+  }, [inRange, today, segments, prIndex]);
 
   return (
     <div className="flex flex-col gap-4">

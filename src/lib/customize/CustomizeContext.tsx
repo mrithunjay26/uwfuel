@@ -25,8 +25,6 @@ const CustomizeContext = createContext<CustomizeContextValue | null>(null);
 function applyToDocument(c: Customize) {
   const { vars, attrs } = computeCustomize(c);
   const root = document.documentElement;
-  // Set produced vars; clear any managed var we're not producing so the base
-  // theme shows through (important when resetting or toggling back to default).
   for (const name of MANAGED_VARS) {
     if (name in vars) root.style.setProperty(name, vars[name]);
     else root.style.removeProperty(name);
@@ -41,6 +39,15 @@ function persistLocal(c: Customize) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(c)); } catch {}
 }
 
+export function readStoredCustomize(): Customize {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? parseCustomize(JSON.parse(raw)) : { ...DEFAULT_CUSTOMIZE };
+  } catch {
+    return { ...DEFAULT_CUSTOMIZE };
+  }
+}
+
 function sameCustomize(a: Customize, b: Customize): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -53,7 +60,6 @@ export function CustomizeProvider({ children }: { children: React.ReactNode }) {
   const stateRef = useRef<Customize>(DEFAULT_CUSTOMIZE);
   stateRef.current = customize;
 
-  // 1. Instant local apply on mount (works offline / before auth resolves).
   useEffect(() => {
     let initial = DEFAULT_CUSTOMIZE;
     try {
@@ -64,8 +70,6 @@ export function CustomizeProvider({ children }: { children: React.ReactNode }) {
     applyToDocument(initial);
   }, []);
 
-  // 2. Sync with the account once signed in: remote wins if present, otherwise
-  //    seed the account with whatever this device currently has.
   useEffect(() => {
     if (!uid) return;
     let seeded = false;
@@ -85,7 +89,6 @@ export function CustomizeProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, [uid]);
 
-  // 3. Data-adaptive: warm/dim the canvas after dark (Pacific time) when enabled.
   useEffect(() => {
     const root = document.documentElement;
     if (!customize.autoNight) {
@@ -144,6 +147,4 @@ export function useCustomize() {
   return ctx;
 }
 
-// Runs before paint (after the theme bootstrap) using the precomputed CSS map,
-// so custom accents/backgrounds don't flash the defaults first.
 export const customizeBootstrapScript = `(function(){try{var raw=localStorage.getItem('${CSS_KEY}');if(!raw)return;var c=JSON.parse(raw);var r=document.documentElement;if(c.vars)for(var k in c.vars)r.style.setProperty(k,c.vars[k]);if(c.attrs)for(var a in c.attrs)r.setAttribute(a,c.attrs[a]);}catch(e){}})();`;

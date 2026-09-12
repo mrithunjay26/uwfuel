@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
+import { tileConfig } from "@/lib/map/tiles";
 
 export interface DayRoutePoint {
   lat: number;
@@ -36,7 +37,6 @@ export function DayRouteMap({ points, color = "#6c5cf2", className }: DayRouteMa
     }
 
     let cancelled = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let map: any = null;
 
     async function init() {
@@ -48,7 +48,8 @@ export function DayRouteMap({ points, color = "#6c5cf2", className }: DayRouteMa
         scrollWheelZoom: false,
         attributionControl: false,
       });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+      const tiles = tileConfig();
+      L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: tiles.maxZoom }).addTo(map);
 
       const latlngs: [number, number][] = points.map((p) => [p.lat, p.lng]);
 

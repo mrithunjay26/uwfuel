@@ -4,10 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CameraStatus = "idle" | "starting" | "active" | "denied" | "unsupported";
 
-/**
- * Live rear-camera access for the meal scanner. `captureFrame` returns a
- * downscaled JPEG data URL suitable for upload.
- */
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onValue, ref } from "firebase/database";
+import { ref } from "firebase/database";
+import { onValue } from "@/lib/offline/db";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { PATHS } from "@/lib/db/paths";
 
-/** Set of date keys (YYYY-MM-DD) that have at least one food-log entry. */
 export function useFoodLogDays(): Set<string> {
   const handle = useUserDb();
   const [days, setDays] = useState<Set<string>>(new Set());

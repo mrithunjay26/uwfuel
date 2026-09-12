@@ -1,10 +1,5 @@
-// Shared exercise search matrix — used by both the workout logger and the
-// training plan studio so their pickers behave identically (recents first,
-// last-done + count badges, fuzzy matching of half-remembered names).
-
 export const normName = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** Fuzzy matcher: substrings score highest, then subsequence with word-start/streak bonuses. -1 = no match. */
 export function fuzzyScore(query: string, target: string): number {
   const q = query.toLowerCase().trim();
   const t = target.toLowerCase();
@@ -42,7 +37,6 @@ export interface ExResult { name: string; count: number; lastDate: string | null
 
 interface LogLike { date: string; exercises: { name: string; sets?: unknown[] }[] }
 
-/** How often / how recently each exercise was actually done across the logs. */
 export function buildExerciseStats(logs: LogLike[]): Map<string, ExStat> {
   const m = new Map<string, ExStat>();
   for (const l of logs) {
@@ -57,10 +51,6 @@ export function buildExerciseStats(logs: LogLike[]): Map<string, ExStat> {
   return m;
 }
 
-/**
- * Rank exercises: previously-done first (by recency, then count); when searching,
- * fuzzy-score with a recency boost so familiar movements surface first.
- */
 export function searchExercises(
   directory: string[],
   stats: Map<string, ExStat>,

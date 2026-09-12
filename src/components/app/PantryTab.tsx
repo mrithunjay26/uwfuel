@@ -39,7 +39,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
   const [editItem, setEditItem] = useState<PantryEntry | null>(null);
   const flash = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
 
-  // Ingredient search (Open Food Facts — foods with photos).
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<IngredientResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -71,7 +70,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
     haptic("light"); flash(`Added ${r.name}`);
   }
 
-  // Manual add.
   const [manualName, setManualName] = useState("");
   async function addManual() {
     if (!handle || !manualName.trim()) return;
@@ -94,12 +92,11 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
     setEditItem(null); haptic("medium");
   }
 
-  // Recipes.
   const [recipes, setRecipes] = useState<Recipe[] | null>(null);
   const [finding, setFinding] = useState(false);
   const [onlyMakeable, setOnlyMakeable] = useState(true);
   const [recipeQuery, setRecipeQuery] = useState("");
-  const [maxBuy, setMaxBuy] = useState<number | null>(null); // null = any
+  const [maxBuy, setMaxBuy] = useState<number | null>(null);
   const [cuisine, setCuisine] = useState<string | null>(null);
   const [openRecipe, setOpenRecipe] = useState<Recipe | null>(null);
   const ingredientNames = useMemo(() => pantry.map((p) => p.name), [pantry]);
@@ -165,7 +162,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
 
   return (
     <div className="flex-1 px-5 pb-8 pt-4">
-      {/* Kitchen summary — configured in Profile */}
       <Link href="/profile" className="press mb-4 flex items-center gap-3 rounded-[16px] border border-line bg-surface-2 px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent"><Utensils className="size-4" /></span>
         <div className="min-w-0 flex-1">
@@ -177,7 +173,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
         <Settings2 className="size-4 shrink-0 text-ink-faint" />
       </Link>
 
-      {/* Pantry inventory */}
       <section className="glass-panel mb-5 rounded-[22px] p-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-[16px] font-extrabold text-ink">Your pantry</h2>
@@ -188,7 +183,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
           )}
         </div>
 
-        {/* Ingredient search */}
         <div className="relative mt-3">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
           <input
@@ -202,7 +196,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
           )}
         </div>
 
-        {/* Search results as image cards */}
         {query.trim().length >= 2 && (
           <div className="mt-2.5">
             {searching && results.length === 0 ? (
@@ -213,7 +206,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
               <div className="grid grid-cols-3 gap-2">
                 {results.map((r, i) => (
                   <button key={i} onClick={() => addFromSearch(r)} className="press group relative overflow-hidden rounded-[12px] border border-line bg-surface text-left">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={r.image} alt="" className="h-16 w-full object-cover" loading="lazy" />
                     <div className="absolute right-1 top-1 grid size-5 place-items-center rounded-full bg-accent text-accent-contrast shadow"><Plus className="size-3" /></div>
                     <div className="p-1.5">
@@ -227,7 +219,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
           </div>
         )}
 
-        {/* Manual add */}
         <div className="mt-3 flex gap-2">
           <input
             value={manualName}
@@ -236,10 +227,9 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
             placeholder="…or add by hand"
             className="min-w-0 flex-1 rounded-[10px] border border-line bg-surface-2 px-3 py-2 text-[13px] text-ink outline-none focus:border-accent"
           />
-          <button onClick={addManual} disabled={!manualName.trim()} className="press grid size-9 shrink-0 place-items-center rounded-[10px] bg-accent text-accent-contrast disabled:opacity-50"><Plus className="size-4" /></button>
+          <button onClick={addManual} disabled={!manualName.trim()} className="press ui-tile grid size-9 shrink-0 place-items-center bg-accent text-accent-contrast disabled:opacity-50"><Plus className="size-4" /></button>
         </div>
 
-        {/* Inventory grid */}
         {pantry.length === 0 ? (
           <div className="mt-4 py-6 text-center">
             <span className="text-3xl">🧺</span>
@@ -252,7 +242,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
               {pantry.map((it) => (
                 <button key={it.id} onClick={() => setEditItem(it)} className="press relative overflow-hidden rounded-[14px] border border-line bg-surface text-left">
                   {it.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img src={it.image} alt="" className="h-16 w-full object-cover" loading="lazy" />
                   ) : (
                     <div className="grid h-16 w-full place-items-center bg-surface-2 text-2xl">{CAT_EMOJI[it.category ?? "other"] ?? "🍽️"}</div>
@@ -270,13 +259,12 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
         )}
       </section>
 
-      {/* Recipe finder */}
       <section className="glass-panel rounded-[22px] p-4">
         <div className="flex items-center gap-2">
           <Sparkles className="size-[18px] text-accent" />
           <h2 className="font-display text-[16px] font-extrabold text-ink">What can I make?</h2>
         </div>
-        <p className="mt-1 text-[12px] text-ink-soft">Real, sourced recipes ranked by your pantry and filtered to your kitchen.</p>
+        <p className="mt-1 text-[12px] text-ink-soft">Real recipes, ranked by how much you already have and what you can cook with.</p>
         <button onClick={runFindRecipes} disabled={finding} className="press mt-3 flex w-full items-center justify-center gap-2 rounded-[14px] bg-accent py-3 text-[14px] font-bold text-accent-contrast disabled:opacity-50">
           {finding ? <><Loader2 className="size-4 animate-spin" /> Searching recipes…</> : <><ChefHat className="size-4" /> Find recipes I can make</>}
         </button>
@@ -285,9 +273,7 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
 
         {recipes && recipes.length > 0 && (
           <>
-            {/* Filters */}
             <div className="mt-4 space-y-2.5">
-              {/* Search within results */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-faint" />
                 <input
@@ -299,14 +285,12 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
                 {recipeQuery && <button onClick={() => setRecipeQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint"><X className="size-4" /></button>}
               </div>
 
-              {/* Ready-to-cook toggle */}
               <div className="flex gap-1.5 rounded-[12px] bg-surface-2 p-1">
                 {([[true, "Ready to cook"], [false, "Show all"]] as const).map(([v, label]) => (
                   <button key={label} onClick={() => setOnlyMakeable(v)} className={`flex-1 rounded-[9px] py-1.5 text-[12px] font-bold transition ${onlyMakeable === v ? "bg-accent text-accent-contrast" : "text-ink-soft"}`}>{label}</button>
                 ))}
               </div>
 
-              {/* Shopping filter */}
               <div className="no-scrollbar -mx-1 flex items-center gap-1.5 overflow-x-auto px-1">
                 <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-ink-faint">To buy:</span>
                 {([[null, "Any"], [0, "None"], [2, "≤2"], [5, "≤5"]] as const).map(([v, label]) => (
@@ -314,7 +298,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
                 ))}
               </div>
 
-              {/* Cuisine filter */}
               {cuisines.length > 1 && (
                 <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
                   <button onClick={() => setCuisine(null)} className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold transition ${!cuisine ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"}`}>All cuisines</button>
@@ -339,7 +322,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
                 {(shownRecipes ?? []).map((r) => (
                   <button key={r.id} onClick={() => { setOpenRecipe(r); haptic("light"); }} className="press flex items-center gap-3 rounded-[16px] border border-line bg-surface-2 p-2.5 text-left">
                     {r.image
-                      // eslint-disable-next-line @next/next/no-img-element
                       ? <img src={r.image} alt="" className="size-16 shrink-0 rounded-[12px] object-cover" loading="lazy" />
                       : <div className="grid size-16 shrink-0 place-items-center rounded-[12px] bg-accent-soft"><ChefHat className="size-6 text-accent" /></div>}
                     <div className="min-w-0 flex-1">
@@ -376,10 +358,6 @@ export function PantryTab({ onScanShelf, canScan = true }: { onScanShelf: () => 
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Recipe detail — instruction-heavy, styled like the app's sheets      */
-/* ------------------------------------------------------------------ */
-
 function RecipeSheet({ recipe: r, onClose, onLog, onSave }: {
   recipe: Recipe; onClose: () => void; onLog: () => void; onSave: () => void;
 }) {
@@ -390,10 +368,8 @@ function RecipeSheet({ recipe: r, onClose, onLog, onSave }: {
     <Portal>
       <div className="fixed inset-0 z-[110] bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={r.title} className="glass-strong animate-rise fixed inset-x-0 bottom-0 z-[110] mx-auto flex max-w-[480px] flex-col overflow-hidden rounded-t-[28px]" style={{ maxHeight: "92dvh" }}>
-        {/* Hero */}
         <div className="relative shrink-0">
           {r.image
-            // eslint-disable-next-line @next/next/no-img-element
             ? <img src={r.image} alt="" className="h-44 w-full object-cover" />
             : <div className="grid h-28 w-full place-items-center bg-accent-soft"><ChefHat className="size-10 text-accent" /></div>}
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pt-10">
@@ -403,7 +379,6 @@ function RecipeSheet({ recipe: r, onClose, onLog, onSave }: {
           <button onClick={onClose} className="press absolute right-3 top-3 grid size-8 place-items-center rounded-full bg-black/50 text-white backdrop-blur"><X className="size-4" /></button>
         </div>
 
-        {/* Scroll body */}
         <div className="thin-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
           <div className="flex flex-wrap items-center gap-1.5">
             {r.canMake
@@ -488,7 +463,6 @@ function RecipeSheet({ recipe: r, onClose, onLog, onSave }: {
           </div>
         </div>
 
-        {/* Actions */}
         <div className="shrink-0 border-t border-line px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3">
           <div className="flex gap-2">
             <button onClick={() => { onLog(); onClose(); }} className="press flex flex-1 items-center justify-center gap-1.5 rounded-[13px] bg-accent py-3 text-[13px] font-bold text-accent-contrast"><Plus className="size-4" /> Log it today</button>
@@ -499,10 +473,6 @@ function RecipeSheet({ recipe: r, onClose, onLog, onSave }: {
     </Portal>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Pantry item editor                                                   */
-/* ------------------------------------------------------------------ */
 
 function PantryItemEditor({ item, onClose, onSave, onDelete }: {
   item: PantryEntry;
@@ -521,7 +491,6 @@ function PantryItemEditor({ item, onClose, onSave, onDelete }: {
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
         <div className="flex items-center gap-3">
           {item.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img src={item.image} alt="" className="size-11 shrink-0 rounded-[12px] object-cover" />
           ) : (
             <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-surface-2 text-xl">{CAT_EMOJI[item.category ?? "other"] ?? "🍽️"}</span>

@@ -7,10 +7,9 @@ import { NoteCard } from "@/components/ui/Card";
 import { TextField } from "@/components/ui/Field";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { testCohereKey } from "@/lib/ai/cohere";
-import { testGroqKey } from "@/lib/ai/groq";
 import { haptic } from "@/lib/utils/haptics";
 
-type Provider = "cohere" | "groq";
+type Provider = "cohere";
 
 const PROVIDERS: Record<Provider, {
   label: string;
@@ -31,17 +30,6 @@ const PROVIDERS: Record<Provider, {
       control usage and billing, with no shared quota.</>
     ),
   },
-  groq: {
-    label: "Groq API key",
-    placeholder: "Paste your Groq key (gsk_…)",
-    url: "https://console.groq.com/keys",
-    getHint: "Free key from groq.com",
-    test: testGroqKey,
-    note: (
-      <>Groq is a <b className="font-semibold">free</b> backup for the meal scanner — used when
-      Cohere isn&apos;t set or is busy. Generous free limits, no card required.</>
-    ),
-  },
 };
 
 type Status = { type: "idle" | "ok" | "err"; msg?: string };
@@ -60,11 +48,12 @@ export function ConnectAIForm({
   allowSkip?: boolean;
 }) {
   const cfg = PROVIDERS[provider];
-  const { setCohereKey, setGroqKey } = useConfig();
-  const setKeyFor = provider === "groq" ? setGroqKey : setCohereKey;
+  const { setCohereKey } = useConfig();
+  const setKeyFor = setCohereKey;
   const [key, setKey] = useState("");
   const [status, setStatus] = useState<Status>({ type: "idle" });
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   async function handleTest() {
     setStatus({ type: "idle" });
@@ -80,10 +69,22 @@ export function ConnectAIForm({
     }
   }
 
-  function handleSave() {
-    if (key.trim()) setKeyFor(key.trim());
-    haptic("success");
-    onSaved?.();
+  async function handleSave() {
+    if (!key.trim()) {
+      onSaved?.();
+      return;
+    }
+    setSaving(true);
+    try {
+      await setKeyFor(key.trim());
+      haptic("success");
+      onSaved?.();
+    } catch (cause) {
+      setStatus({ type: "err", msg: cause instanceof Error ? cause.message : "Couldn't save that key." });
+      haptic("error");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -129,7 +130,7 @@ export function ConnectAIForm({
         <Button variant="secondary" full loading={testing} onClick={handleTest} disabled={!key.trim()}>
           Test key
         </Button>
-        <Button full onClick={handleSave}>
+        <Button full loading={saving} onClick={handleSave}>
           {saveLabel}
         </Button>
         {allowSkip && (

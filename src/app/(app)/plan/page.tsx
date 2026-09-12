@@ -29,6 +29,7 @@ import {
   Utensils,
 } from "lucide-react";
 import { useConfig }       from "@/lib/config/ConfigContext";
+import { useCustomize }    from "@/lib/customize/CustomizeContext";
 import { useUserDb }       from "@/lib/hooks/useUserDb";
 import { useUserProfile }  from "@/lib/hooks/useUserProfile";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
@@ -43,9 +44,18 @@ import {
   haversineMetres,
   walkingMinutes,
 } from "@/lib/hooks/useGeolocation";
-import { callCohere } from "@/lib/ai/cohere";
+import { callCohere, CohereTimeoutError } from "@/lib/ai/cohere";
+import {
+  fitDay,
+  slotTypesFor,
+  ANYWHERE_LOCATION,
+  type PlannerItem,
+  type PlannerPick,
+  type PlannerSlot,
+} from "@/lib/planner/fitDay";
+import { useFoodInventory } from "@/lib/hooks/useFoodInventory";
 import { extractJsonObject } from "@/lib/ai/json";
-import { setActivePlan, clearActivePlan, savePlanToRepo, deletePlanFromRepo, logFoodItem } from "@/lib/db/userDb";
+import { setActivePlan, clearActivePlan, savePlanToRepo, deletePlanFromRepo, logFoodItem, newPlanId } from "@/lib/db/userDb";
 import {
   getDiningLocations,
   resolveMenuDate,
@@ -86,6 +96,63 @@ type PlanTab = "ai" | "manual";
 const MEAL_COUNTS = [2, 3, 4, 5] as const;
 type MealCount = typeof MEAL_COUNTS[number];
 const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack"];
+
+const PROMPT_MENU_LIMIT = 45;
+const AI_TIMEOUT_MS = 25_000;
+
+const normItem = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const MEAL_WINDOWS: Record<MealType, [number, number]> = {
+  Breakfast: [7 * 60, 10 * 60],
+  Lunch: [11 * 60 + 15, 14 * 60 + 30],
+  Dinner: [17 * 60, 20 * 60 + 30],
+  Snack: [14 * 60 + 45, 16 * 60 + 45],
+};
+
+interface ClassBlock { label: string; start: number; end: number; lat: number; lng: number }
+
+function firstFreeMinute(classes: ClassBlock[], from: number, to: number): number | null {
+  const need = 35;
+  const options = classes.filter((c) => c.end >= from && c.end <= to - need).map((c) => c.end + 5);
+  options.push(from + 30);
+  options.sort((a, b) => a - b);
+  for (const minute of options) {
+    if (minute < from || minute + need > to) continue;
+    if (classes.some((c) => minute < c.end && minute + need > c.start)) continue;
+    return minute;
+  }
+  return null;
+}
+
+function anchorClass(classes: ClassBlock[], minute: number): ClassBlock | null {
+  let before: ClassBlock | null = null;
+  for (const c of classes) if (c.end <= minute && (!before || c.end > before.end)) before = c;
+  if (before) return before;
+  let after: ClassBlock | null = null;
+  for (const c of classes) if (c.start >= minute && (!after || c.start < after.start)) after = c;
+  return after;
+}
+
+function clockLabel(minute: number): string {
+  const total = ((Math.round(minute) % 1440) + 1440) % 1440;
+  const h24 = Math.floor(total / 60);
+  const m = total % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+function toPlannerItem(item: FlatMenuItem): PlannerItem {
+  return {
+    key: item.unique_key,
+    name: item.name,
+    location_id: item.location_id,
+    location_name: item.location_name,
+    calories: item.calories,
+    protein: item.protein_grams,
+    price: item.price,
+  };
+}
 
 interface ManualEntry {
   id:                   string;
@@ -244,8 +311,11 @@ export default function PlanPage() {
     refresh: refreshGeo,
   } = useGeolocation(false);
 
+  const { customize, setCustomize } = useCustomize();
   const setupBudget = useMemo(() => computeBudgetSnapshot(setupProfile, expenses, today), [setupProfile, expenses, today]);
-  const budget = setupProfile ? Math.max(3, setupBudget.combinedTodayGuide) : dailyBudget;
+  const walletGuide = setupProfile ? Math.max(3, setupBudget.combinedTodayGuide) : null;
+  const budgetIsCustom = walletGuide !== null && customize.plannerBudgetCap != null;
+  const budget = walletGuide !== null ? (customize.plannerBudgetCap ?? walletGuide) : dailyBudget;
 
   const [planTab,      setPlanTab]      = useState<PlanTab>("ai");
   const [mealCount,    setMealCount]    = useState<MealCount>(3);
@@ -256,15 +326,35 @@ export default function PlanPage() {
   const [showRepo,     setShowRepo]     = useState(false);
   const [generating,   setGenerating]   = useState(false);
   const [genError,     setGenError]     = useState<string | null>(null);
+  const [genElapsed,   setGenElapsed]   = useState(0);
+  useEffect(() => {
+    if (!generating) { setGenElapsed(0); return; }
+    const started = Date.now();
+    const id = setInterval(() => setGenElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [generating]);
   const [notifGranted, setNotifGranted] = useState(false);
   const [loggedPick,   setLoggedPick]   = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { setNotifGranted(notificationsGranted()); }, []);
 
-  function stepBudget(delta: number) {
-    const next = Math.max(3, Math.min(100, Math.round((budget + delta) * 100) / 100));
-    setDailyBudget(next);
+  function applyBudget(value: number) {
+    if (!Number.isFinite(value)) return;
+    const next = Math.max(3, Math.min(200, Math.round(value * 100) / 100));
+    if (walletGuide !== null) setCustomize({ plannerBudgetCap: next });
+    else setDailyBudget(next);
+  }
+  function stepBudget(delta: number) { applyBudget(budget + delta); }
+
+  const [budgetDraft, setBudgetDraft] = useState(() => budget.toFixed(2));
+  const [budgetFocused, setBudgetFocused] = useState(false);
+  useEffect(() => { if (!budgetFocused) setBudgetDraft(budget.toFixed(2)); }, [budget, budgetFocused]);
+  function commitBudgetDraft() {
+    setBudgetFocused(false);
+    const parsed = parseFloat(budgetDraft.replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(parsed)) applyBudget(parsed);
+    else setBudgetDraft(budget.toFixed(2));
   }
 
   const [locations,  setLocations]  = useState<DiningLocationsSnapshot | null>(null);
@@ -294,6 +384,91 @@ export default function PlanPage() {
   const weight     = profile?.current_weight ?? 160;
   const weeklyRate = profile?.target_weekly_change_lbs ?? 0;
   const targetKcal = dailyTargetCalories(weight, weeklyRate);
+  const { items: savedFoods } = useFoodInventory();
+
+  const locationCoords = useMemo(() => {
+    const out: Record<string, { lat: number; lng: number }> = {};
+    Object.entries(locations ?? {}).forEach(([id, loc]) => {
+      if (typeof loc.latitude === "number" && typeof loc.longitude === "number") {
+        out[id] = { lat: loc.latitude, lng: loc.longitude };
+      }
+    });
+    return out;
+  }, [locations]);
+
+  const classBlocks = useMemo<ClassBlock[]>(
+    () => todayStops
+      .filter((s) => s.lat != null && s.lng != null)
+      .map((s) => ({
+        label: s.building_label,
+        start: parseClock(s.start_time),
+        end: parseClock(s.end_time),
+        lat: s.lat as number,
+        lng: s.lng as number,
+      }))
+      .filter((c) => c.start >= 0 && c.end > c.start)
+      .sort((a, b) => a.start - b.start),
+    [todayStops],
+  );
+
+  const planSlots = useMemo<PlannerSlot[]>(() => {
+    let snackShift = 0;
+    return slotTypesFor(mealCount).map((type) => {
+      const [from, to] = MEAL_WINDOWS[type];
+      let minute = from + 30;
+      if (type === "Snack") {
+        minute = from + snackShift;
+        snackShift += 75;
+      }
+      const fitted = firstFreeMinute(classBlocks, from, to);
+      if (fitted != null && type !== "Snack") minute = fitted;
+      const anchor = anchorClass(classBlocks, minute);
+      return { type, time: clockLabel(minute), near: anchor ? { lat: anchor.lat, lng: anchor.lng } : null };
+    });
+  }, [mealCount, classBlocks]);
+
+  const plannerPool = useMemo<PlannerItem[]>(
+    () => eligibleMenuItems
+      .filter((i) => i.price > 0 && i.price <= budget && isSubstantialFood(i))
+      .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget))
+      .map(toPlannerItem),
+    [eligibleMenuItems, budget, phase],
+  );
+
+  const plannerExtras = useMemo<PlannerItem[]>(() => {
+    const sides = eligibleMenuItems
+      .filter((i) => i.price > 0 && i.price <= budget && i.calories >= 80 && !isSubstantialFood(i))
+      .sort((a, b) => b.calories - a.calories)
+      .map(toPlannerItem);
+    const owned = savedFoods
+      .filter((f) => f.calories > 0)
+      .map((f) => ({
+        key: `saved-${f.id}`,
+        name: f.name,
+        location_id: ANYWHERE_LOCATION,
+        location_name: "Food you already have",
+        calories: f.calories,
+        protein: f.protein_grams,
+        price: f.price ?? 0,
+      }));
+    return [...owned, ...sides];
+  }, [eligibleMenuItems, budget, savedFoods]);
+
+  const nearbySpotsFor = useCallback(
+    (slot: PlannerSlot) => {
+      const near = slot.near;
+      if (!near || !locations) return [] as { name: string; walkMin: number }[];
+      return buildLocationGroups(locations)
+        .flatMap((g) => {
+          const loc = locations[g.stations[0]?.id];
+          if (!loc?.latitude || !loc?.longitude) return [];
+          return [{ name: g.name, walkMin: walkingMinutes(haversineMetres(near.lat, near.lng, loc.latitude, loc.longitude)) }];
+        })
+        .sort((a, b) => a.walkMin - b.walkMin)
+        .slice(0, 3);
+    },
+    [locations],
+  );
 
   const nearbyPick = useMemo<NearbyPick | null>(() => {
     if (!userGeo || !locations || eligibleMenuItems.length === 0) return null;
@@ -367,7 +542,7 @@ export default function PlanPage() {
       const protein = meal.estimated_protein || 0;
       const macros = estimateMacros(meal.estimated_calories, protein);
       await logFoodItem(handle.db, handle.uid, today, {
-        name:          meal.item_name,
+        name:          meal.add_ons?.length ? `${meal.item_name} + ${meal.add_ons.map((a) => a.item_name).join(" + ")}` : meal.item_name,
         description:   meal.location_name ? `From your ${meal.meal_type.toLowerCase()} plan` : "",
         calories:      meal.estimated_calories,
         protein_grams: protein,
@@ -620,12 +795,19 @@ export default function PlanPage() {
   const buildPrompt = useCallback(() => {
     const budgetStr   = budget.toFixed(2);
 
-    const candidates = eligibleMenuItems
-      .filter((i) => i.available_now && i.price > 0 && i.price <= budget && isSubstantialFood(i))
-      .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget))
-      .slice(0, 150);
-    const sample = candidates
-      .map((i) => `- ${i.name} @ ${i.location_name} — $${i.price.toFixed(2)}, ${i.calories} cal, ${Math.round(i.protein_grams)}g protein`)
+    const sample = plannerPool
+      .slice(0, PROMPT_MENU_LIMIT)
+      .map((i) => `- ${i.name} @ ${i.location_name} — $${i.price.toFixed(2)}, ${i.calories} cal, ${Math.round(i.protein)}g protein`)
+      .join("\n");
+
+    const shape = planSlots
+      .map((slot, i) => {
+        const spots = nearbySpotsFor(slot);
+        const where = spots.length
+          ? ` — closest spots: ${spots.map((s) => `${s.name} (${s.walkMin} min walk)`).join(", ")}`
+          : "";
+        return `${i + 1}. ${slot.type} around ${slot.time}${where}`;
+      })
       .join("\n");
 
     const nearbyCtx = nearbyOn && nearbyPick
@@ -650,101 +832,118 @@ export default function PlanPage() {
 1. Choose ONLY items from the MENU list in the user message. Copy each item_name and location_name EXACTLY as written, character for character. NEVER invent, rename, paraphrase, merge, or guess items or locations (made-up places like "Pike Place" will be rejected).
 2. Use each item's EXACT price from the list — NEVER change a price to make a plan fit.
 3. The SUM of the chosen items' prices MUST be UNDER $${budgetStr}. Pick cheaper real items so the total fits.
-4. If ${mealCount} meals can't fit under $${budgetStr}, return FEWER meals — never exceed the budget.
+4. Return exactly ${mealCount} meals — choose cheaper real items so all ${mealCount} fit under $${budgetStr}. Only return fewer if even the cheapest items can't fit.
+5. CALORIES MATTER MOST. The day must add up to about ${targetKcal} kcal. Pick the biggest plates that still fit the budget. Coming in 500+ kcal short is a failed plan.
+6. Put each meal at or near the spots listed for its time slot so the student isn't crossing campus between classes.
 ━━━━━━━━━━━━━━━━━
 
-Respond ONLY with valid JSON (no markdown, no extra text):
+Respond ONLY with valid JSON (no markdown, no extra text). Keep it short — nutrition and prices
+are filled in from the menu, so don't repeat them:
 {
-  "title": "string",
-  "summary": "1–2 sentences describing why this plan fits the user's goals",
+  "title": "string (max 6 words)",
+  "summary": "one sentence on why this plan fits the student",
   "meals": [
     {
       "meal_type": "Breakfast" | "Lunch" | "Dinner" | "Snack",
-      "item_name": "string",
-      "location_name": "string",
-      "estimated_calories": number,
-      "estimated_protein": number,
-      "estimated_cost": number,
+      "item_name": "exact name from the MENU",
+      "location_name": "exact location from the MENU",
       "suggested_time": "e.g. 8:00 AM",
-      "reasoning": "string (1 sentence)"
+      "reasoning": "max 12 words"
     }
-  ],
-  "daily_totals": { "calories": number, "protein": number, "cost": number }
+  ]
 }`;
 
     const user = `HARD BUDGET CAP: $${budgetStr} TOTAL — DO NOT EXCEED.
+DAILY CALORIE TARGET: ${targetKcal} kcal — hit it.
 
 Plan ${mealCount} meal(s) for today (${new Date().toLocaleDateString("en-US", { weekday: "long", timeZone: "America/Los_Angeles" })}).
 Goal: ${phase} phase · ${targetKcal} kcal target · ${weight} lbs.
+
+WHEN AND WHERE:
+${shape}
 ${requestCtx ? requestCtx + "\n" : ""}${nearbyCtx ? nearbyCtx + "\n" : ""}${classCtx ? classCtx + "\n" : ""}${routeCtx ? routeCtx + "\n" : ""}
 MENU — choose ONLY from these real items and use their EXACT prices:
 ${sample || "(No menu items are available within this budget right now.)"}
 
-Verify before submitting: every item and price is from the MENU above, and sum(estimated_cost) < $${budgetStr}. Prioritize high-protein for ${phase}.`;
+Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} — pick cheaper items rather than returning fewer. Every item must come from the MENU above. Prioritize high-protein for ${phase}.`;
 
     return [
       { role: "system" as const, content: system },
       { role: "user"   as const, content: user   },
     ];
-  }, [budget, mealCount, eligibleMenuItems, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest]);
+  }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest]);
 
-  async function handleSmartPlan() {
+  function buildPlan(picks: PlannerPick[]): { meals: PlanMeal[]; notes: string[] } {
+    return fitDay({
+      slots: planSlots,
+      pool: plannerPool,
+      extras: plannerExtras,
+      coords: locationCoords,
+      budget,
+      targetKcal,
+      picks,
+    });
+  }
+
+
+  function commitPlan(meals: PlanMeal[], meta: { source: "ai" | "manual"; title: string; summary: string }) {
     if (!handle) return;
-    setGenerating(true);
-    setGenError(null);
-    try {
-      const ranked = eligibleMenuItems
-        .filter((item) => item.available_now && item.price > 0 && item.price <= budget && isSubstantialFood(item))
-        .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget));
-      const picked: FlatMenuItem[] = [];
-      let spent = 0;
-      for (const item of ranked) {
-        if (picked.some((current) => current.name === item.name) || spent + item.price > budget) continue;
-        picked.push(item);
-        spent += item.price;
-        if (picked.length >= mealCount) break;
-      }
-      if (!picked.length) throw new Error("No open, dietary-safe menu items fit the current budget.");
-      const meals: PlanMeal[] = picked.map((item, index) => {
-        const mealType = MEAL_TYPES[Math.min(index, MEAL_TYPES.length - 1)];
-        return {
-          meal_type: mealType,
-          item_name: item.name,
-          location_id: item.location_id,
-          location_name: item.location_name,
-          estimated_calories: item.calories,
-          estimated_protein: item.protein_grams,
-          estimated_cost: item.price,
-          suggested_time: defaultTimeFor(mealType),
-          reasoning: "Best available match for your budget, food rules, and nutrition goal.",
-        };
-      });
-      const daily_totals = meals.reduce((totals, meal) => ({
-        calories: totals.calories + meal.estimated_calories,
-        protein: totals.protein + meal.estimated_protein,
-        cost: totals.cost + meal.estimated_cost,
-      }), { calories: 0, protein: 0, cost: 0 });
-      const plan: MealPlan = {
-        source: "manual",
-        title: "Smart campus plan",
-        summary: "Built without AI from open, budget-safe, dietary-compatible UW menu items.",
-        meals,
-        daily_totals,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      const planId = await savePlanToRepo(handle.db, handle.uid, today, plan);
-      await setActivePlan(handle.db, handle.uid, { plan_id: planId, source: "manual", title: plan.title, date: today, daily_totals, meals });
-    } catch (cause) {
-      setGenError(cause instanceof Error ? cause.message : "Could not build a plan.");
-    } finally {
-      setGenerating(false);
+    const daily_totals = {
+      calories: meals.reduce((s, m) => s + m.estimated_calories, 0),
+      protein:  meals.reduce((s, m) => s + m.estimated_protein, 0),
+      cost:     Math.round(meals.reduce((s, m) => s + m.estimated_cost, 0) * 100) / 100,
+    };
+    const planId = newPlanId(handle.db, handle.uid, today);
+    void Promise.all([
+      savePlanToRepo(handle.db, handle.uid, today, { source: meta.source, title: meta.title, summary: meta.summary, meals, daily_totals }, planId),
+      setActivePlan(handle.db, handle.uid, { plan_id: planId, source: meta.source, title: meta.title, date: today, daily_totals, meals }),
+    ]).catch((e) => setGenError(e instanceof Error ? `Couldn't save this plan: ${e.message}` : "Couldn't save this plan."));
+
+    if (remindersOn && notifGranted) {
+      void scheduleMealReminders(meals.map((m) => ({
+        mealType:     m.meal_type,
+        time:         to24h(m.suggested_time),
+        locationName: m.location_name,
+        itemName:     m.item_name,
+      }))).catch(() => {});
     }
+  }
+
+  function handleSmartPlan(reason?: string) {
+    if (!handle) return;
+    setGenError(null);
+    const { meals, notes } = buildPlan([]);
+    if (!meals.length) {
+      setGenError(`Nothing on today's menu fits a ${formatMoney(budget)} day. Raise the cap and try again.`);
+      return;
+    }
+    commitPlan(meals, {
+      source: "manual",
+      title: "Campus plan",
+      summary: `Built from today's menu around ${targetKcal.toLocaleString("en-US")} kcal and your class times.`,
+    });
+    const all = [reason, ...notes].filter(Boolean);
+    if (all.length) setGenError(all.join(" "));
+  }
+
+  function cancelGenerate() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setGenerating(false);
   }
 
   async function handleGenerate() {
     if (!handle) return;
-    if (!cohereKey) { await handleSmartPlan(); return; }
+    if (menuItems.length === 0) {
+      setGenError("Today's menu hasn't loaded yet — give it a second and try again.");
+      return;
+    }
+    if (plannerPool.length === 0) {
+      setGenError(`Nothing on today's menu fits a ${formatMoney(budget)} day. Raise the cap and try again.`);
+      return;
+    }
+    if (!cohereKey) { handleSmartPlan(); return; }
+
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -752,123 +951,81 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
     setGenError(null);
 
     try {
-      const raw = await callCohere(cohereKey, buildPrompt(), { temperature: 0.6, signal: ctrl.signal });
+      let raw: string;
+      try {
+        raw = await callCohere(cohereKey, buildPrompt(), {
+          temperature: 0.4,
+          signal: ctrl.signal,
+          timeoutMs: AI_TIMEOUT_MS,
+          maxTokens: 700,
+          jsonMode: true,
+        });
+      } catch (err) {
+        if (ctrl.signal.aborted) return;
+        handleSmartPlan(
+          err instanceof CohereTimeoutError
+            ? "The AI was slow, so this plan was built instantly from today's menu."
+            : `AI unavailable (${err instanceof Error ? err.message : "error"}) — built instantly from today's menu.`,
+        );
+        return;
+      }
 
-      let p: {
+      let parsed: {
         title?: string;
         summary?: string;
-        meals?: Array<Partial<PlanMeal> & { meal_type?: string }>;
-        daily_totals?: { calories?: number; protein?: number; cost?: number };
+        meals?: Array<{ meal_type?: string; item_name?: string; suggested_time?: string; reasoning?: string }>;
       };
       try {
-        p = extractJsonObject(raw);
+        parsed = extractJsonObject(raw);
       } catch {
-        throw new Error("AI returned invalid JSON. Please try again.");
+        handleSmartPlan("The AI's answer was garbled, so this plan was built instantly from today's menu.");
+        return;
       }
 
-      const rawMeals = (p.meals || []) as Array<{
-        meal_type?: string; item_name?: string; location_name?: string;
-        estimated_calories?: number; estimated_protein?: number; estimated_cost?: number;
-        suggested_time?: string; reasoning?: string;
-      }>;
-
-      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       const byName = new Map<string, FlatMenuItem>();
-      eligibleMenuItems.forEach((i) => { const k = norm(i.name); if (k && !byName.has(k)) byName.set(k, i); });
+      eligibleMenuItems.forEach((i) => { const k = normItem(i.name); if (k && !byName.has(k)) byName.set(k, i); });
       const matchItem = (name: string): FlatMenuItem | null => {
-        const k = norm(name || "");
+        const k = normItem((name || "").split(/\s+[@—–]\s+/)[0]);
         if (!k) return null;
-        if (byName.has(k)) return byName.get(k)!;
-        return eligibleMenuItems.find((i) => { const n = norm(i.name); return n && (n.includes(k) || k.includes(n)); }) || null;
+        return byName.get(k)
+          ?? eligibleMenuItems.find((i) => { const n = normItem(i.name); return Boolean(n) && (n.includes(k) || k.includes(n)); })
+          ?? null;
       };
 
-      let meals: PlanMeal[] = rawMeals.flatMap((m, i): PlanMeal[] => {
+      const rawMeals = Array.isArray(parsed.meals) ? parsed.meals : [];
+      const picks: PlannerPick[] = rawMeals.flatMap((m): PlannerPick[] => {
         const match = matchItem(m.item_name || "");
         if (!match) return [];
-        return [{
-          meal_type:          (MEAL_TYPES.includes(m.meal_type as MealType) ? m.meal_type : "Snack") as MealType,
-          item_name:          match.name,
-          location_id:        match.location_id,
-          location_name:      match.location_name,
-          estimated_calories: match.calories,
-          estimated_protein:  Math.round(match.protein_grams),
-          estimated_cost:     match.price,
-          suggested_time:     m.suggested_time || `${8 + i * 4}:00 AM`,
-          reasoning:          m.reasoning || "",
-        }];
+        const type = (MEAL_TYPES.includes(m.meal_type as MealType) ? m.meal_type : "Lunch") as MealType;
+        return [{ type, key: match.unique_key, time: m.suggested_time, reasoning: m.reasoning }];
+      });
+      const offMenu = rawMeals.length - picks.length;
+
+      const { meals, notes } = buildPlan(picks);
+      if (!meals.length) {
+        setGenError(`Nothing on today's menu fits a ${formatMoney(budget)} day. Raise the cap and try again.`);
+        return;
+      }
+      commitPlan(meals, {
+        source: "ai",
+        title: parsed.title || `${mealCount}-Meal AI Plan`,
+        summary: parsed.summary || "",
       });
 
-      if (meals.length === 0) {
-        throw new Error("The AI suggested items that aren't on today's menu. Tap Generate to try again.");
-      }
-
-      const droppedCount = rawMeals.length - meals.length;
-      const sumCost = (arr: PlanMeal[]) => arr.reduce((s, m) => s + (m.estimated_cost || 0), 0);
-      const originalCount = meals.length;
-      while (meals.length > 1 && sumCost(meals) > budget) {
-        let idx = 0;
-        for (let j = 1; j < meals.length; j++) {
-          if (meals[j].estimated_cost > meals[idx].estimated_cost) idx = j;
-        }
-        meals = meals.filter((_, j) => j !== idx);
-      }
-      const total = sumCost(meals);
-      let budgetWarning: string | null = null;
-      if (total > budget) {
-        budgetWarning = `This plan is ${formatMoney(total)}, over your ${formatMoney(budget)} budget. Try regenerating or raising your budget.`;
-      } else {
-        const notes: string[] = [];
-        if (meals.length < originalCount) {
-          notes.push(`trimmed to ${meals.length} meal${meals.length === 1 ? "" : "s"} for your ${formatMoney(budget)} budget`);
-        }
-        if (droppedCount > 0) {
-          notes.push(`skipped ${droppedCount} suggestion${droppedCount === 1 ? "" : "s"} not on today's menu`);
-        }
-        if (notes.length) budgetWarning = `Adjusted: ${notes.join(" and ")}.`;
-      }
-
-      const plan: MealPlan = {
-        source:       "ai",
-        title:        p.title   || `${mealCount}-Meal AI Plan`,
-        summary:      p.summary || "",
-        meals,
-        daily_totals: {
-          calories: meals.reduce((s, m) => s + m.estimated_calories, 0),
-          protein:  meals.reduce((s, m) => s + m.estimated_protein,  0),
-          cost:     parseFloat(total.toFixed(2)),
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const planId = await savePlanToRepo(handle.db, handle.uid, today, plan);
-      await setActivePlan(handle.db, handle.uid, {
-        plan_id:      planId,
-        source:       "ai",
-        title:        plan.title,
-        date:         today,
-        daily_totals: plan.daily_totals,
-        meals,
-      });
-
-      if (remindersOn && notifGranted) {
-        await scheduleMealReminders(
-          meals.map((m) => ({
-            mealType:     m.meal_type,
-            time:         to24h(m.suggested_time),
-            locationName: m.location_name,
-            itemName:     m.item_name,
-          })),
-        );
-      }
-
-      if (budgetWarning) setGenError(budgetWarning);
+      const shown = [
+        ...notes,
+        offMenu > 0
+          ? `${offMenu} AI pick${offMenu === 1 ? " wasn't" : "s weren't"} on today's menu, so ${offMenu === 1 ? "it was" : "they were"} swapped for something real.`
+          : null,
+      ].filter(Boolean);
+      if (shown.length) setGenError(shown.join(" "));
     } catch (err) {
-      if ((err as Error).name !== "AbortError") {
-        setGenError(err instanceof Error ? err.message : "Generation failed. Try again.");
-      }
+      if (!ctrl.signal.aborted) setGenError(err instanceof Error ? err.message : "Generation failed. Try again.");
     } finally {
-      setGenerating(false);
+      if (abortRef.current === ctrl) {
+        abortRef.current = null;
+        setGenerating(false);
+      }
     }
   }
 
@@ -1002,7 +1159,7 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
                 <p className="text-[10px] font-bold uppercase tracking-wide text-success">Today&apos;s active plan</p>
                 <p className="mt-0.5 font-display text-[16px] font-extrabold text-ink">{activePlan.title}</p>
                 <p className="mt-0.5 text-[12px] text-ink-soft">
-                  {activePlan.daily_totals.calories} kcal · {activePlan.daily_totals.protein}g protein · {formatMoney(activePlan.daily_totals.cost)}
+                  {activePlan.daily_totals.calories.toLocaleString("en-US")} of {targetKcal.toLocaleString("en-US")} kcal · {activePlan.daily_totals.protein}g protein · {formatMoney(activePlan.daily_totals.cost)}
                 </p>
               </div>
               <button
@@ -1032,23 +1189,53 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
               <div className="mt-3 flex items-center justify-between gap-3">
                 <button
                   onClick={() => stepBudget(-1)}
+                  aria-label="Lower budget cap by $1"
                   className="press grid size-9 place-items-center rounded-full bg-surface-2 text-ink-soft active:bg-surface-3"
                 >
                   <Minus className="size-4" />
                 </button>
-                <div className="text-center">
-                  <p className="font-display text-[28px] font-extrabold text-ink leading-none">
-                    {formatMoney(budget)}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-ink-faint">per day</p>
-                </div>
+                <label className="text-center">
+                  <span className="flex items-baseline justify-center font-display text-[28px] font-extrabold leading-none text-ink">
+                    $
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={budgetDraft}
+                      onFocus={(e) => { setBudgetFocused(true); e.currentTarget.select(); }}
+                      onChange={(e) => setBudgetDraft(e.target.value)}
+                      onBlur={commitBudgetDraft}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                      aria-label="Daily budget cap in dollars"
+                      className="w-[5.5ch] bg-transparent text-center outline-none"
+                    />
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-ink-faint">per day · tap to type</span>
+                </label>
                 <button
                   onClick={() => stepBudget(1)}
+                  aria-label="Raise budget cap by $1"
                   className="press grid size-9 place-items-center rounded-full bg-surface-2 text-ink-soft active:bg-surface-3"
                 >
                   <Plus className="size-4" />
                 </button>
               </div>
+              {walletGuide !== null && (
+                <div className="mt-3 flex items-center justify-between gap-2 rounded-[12px] bg-surface-2 px-3 py-2">
+                  <span className="text-[11px] text-ink-soft">
+                    {budgetIsCustom
+                      ? `Custom cap · your wallet guide today is ${formatMoney(walletGuide)}`
+                      : "Following today's food-wallet guide"}
+                  </span>
+                  {budgetIsCustom && (
+                    <button
+                      onClick={() => setCustomize({ plannerBudgetCap: null })}
+                      className="shrink-0 text-[11px] font-bold text-accent-ink"
+                    >
+                      Use guide
+                    </button>
+                  )}
+                </div>
+              )}
             </section>
 
             <section className="glass-panel rounded-[22px] p-4">
@@ -1379,23 +1566,39 @@ Verify before submitting: every item and price is from the MENU above, and sum(e
               </div>
             )}
 
-            <button
-              onClick={handleGenerate}
-              disabled={generating || !handle}
-              className="press flex w-full items-center justify-center gap-2 rounded-[18px] bg-accent py-4 text-[15px] font-bold text-accent-contrast shadow-[var(--shadow-md)] disabled:opacity-50"
-            >
-              {generating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating… stay under {formatMoney(budget)}
-                </>
-              ) : (
-                <>
-                  <Sparkles className="size-4" />
-                  {activePlan ? "Regenerate plan" : `${hasCohere ? "Generate" : "Build"} ${mealCount}-meal plan`}
-                </>
-              )}
-            </button>
+            {generating ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2">
+                  <div
+                    role="status"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-[18px] bg-accent/85 py-4 text-[14px] font-bold text-accent-contrast shadow-[var(--shadow-md)]"
+                  >
+                    <Loader2 className="size-4 animate-spin" />
+                    {genElapsed < 2 ? "Reading today's menu…" : `Personalizing with AI… ${genElapsed}s`}
+                  </div>
+                  <button
+                    onClick={cancelGenerate}
+                    className="press rounded-[18px] bg-surface-2 px-5 text-[14px] font-bold text-ink"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {genElapsed >= 10 && (
+                  <p className="text-center text-[11px] text-ink-soft">
+                    Taking longer than usual — if the AI hasn&apos;t answered by {AI_TIMEOUT_MS / 1000}s you&apos;ll get an instant plan instead.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={!handle}
+                className="press flex w-full items-center justify-center gap-2 rounded-[18px] bg-accent py-4 text-[15px] font-bold text-accent-contrast shadow-[var(--shadow-md)] disabled:opacity-50"
+              >
+                <Sparkles className="size-4" />
+                {activePlan ? "Regenerate plan" : `${hasCohere ? "Generate" : "Build"} ${mealCount}-meal plan`}
+              </button>
+            )}
 
           </div>
         )}
@@ -1681,6 +1884,12 @@ function MealRow({
           </div>
           <p className="mt-0.5 text-[13px] font-bold text-ink">{meal.item_name}</p>
           <p className="text-[11px] text-ink-soft">{meal.location_name}</p>
+          {meal.add_ons?.map((add) => (
+            <p key={add.item_name} className="text-[11px] text-ink-soft">
+              + {add.item_name}
+              <span className="text-ink-faint"> · {add.estimated_calories} cal</span>
+            </p>
+          ))}
           {meal.reasoning && (
             <p className="mt-0.5 text-[10px] italic text-ink-faint">{meal.reasoning}</p>
           )}

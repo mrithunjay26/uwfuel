@@ -1,8 +1,6 @@
 import type { ScannedFood } from "@/lib/nutrition/scan";
 import type { RawFood } from "./_vision";
-
-// Server-only nutrition data sources: Open Food Facts (barcodes, keyless) and
-// USDA FoodData Central (generic foods + grounding, free key).
+import { lookupFood, type FoodFacts } from "./_foods";
 
 const memo = new Map<string, { at: number; value: unknown }>();
 const TTL = 10 * 60 * 1000;
@@ -30,8 +28,6 @@ async function fetchJson(url: string, init?: RequestInit, ms = 8000): Promise<un
 }
 
 const num = (v: unknown) => (typeof v === "number" && isFinite(v) && v >= 0 ? v : 0);
-
-/* ── Open Food Facts (barcode) ─────────────────────────────────────── */
 
 export async function offBarcode(code: string): Promise<ScannedFood | null> {
   const gtin = code.replace(/\D/g, "");
@@ -73,7 +69,6 @@ export async function offBarcode(code: string): Promise<ScannedFood | null> {
   return food;
 }
 
-/** Open Food Facts text search → ScannedFood candidates (manual lookup). */
 export async function offSearch(query: string): Promise<ScannedFood[]> {
   const key = `offsearch:${query.toLowerCase()}`;
   const cached = cacheGet<ScannedFood[]>(key);
@@ -112,8 +107,6 @@ export async function offSearch(query: string): Promise<ScannedFood[]> {
   return out;
 }
 
-/* ── USDA FoodData Central ─────────────────────────────────────────── */
-
 interface FdcNutrients { kcal: number; protein: number; carbs: number; fat: number; }
 
 function readFdcNutrients(food: Record<string, unknown>): FdcNutrients {
@@ -151,7 +144,6 @@ async function fdcSearchRaw(query: string, dataType: string, pageSize: number): 
   }
 }
 
-/** Manual search → ScannedFood candidates (per 100 g basis from FDC). */
 export async function fdcSearch(query: string): Promise<ScannedFood[]> {
   const foods = await fdcSearchRaw(query, "Foundation,SR Legacy,Branded", 6);
   return foods.map((f) => {
@@ -172,34 +164,73 @@ export async function fdcSearch(query: string): Promise<ScannedFood[]> {
   }).filter((f) => f.calories > 0);
 }
 
-/**
- * Ground LLM estimates against FDC for whole foods. Only overrides when we can
- * scale per-100g FDC data by the model's estimated grams — so it never makes
- * numbers worse for branded/composite dishes (those keep the LLM estimate).
- */
+const PORTION_FALLBACK = 150;
+
+function scaleTo(facts: FoodFacts, grams: number) {
+  const factor = grams / 100;
+  return {
+    calories: Math.round(facts.kcal * factor),
+    protein: Math.round(facts.protein * factor),
+    carbs: Math.round(facts.carbs * factor),
+    fat: Math.round(facts.fat * factor),
+  };
+}
+
+function sharesToken(a: string, b: string): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-zs]/g, " ").split(/s+/).filter((w) => w.length > 2);
+  const set = new Set(norm(a));
+  return norm(b).some((w) => set.has(w));
+}
+
+async function offFacts(name: string): Promise<FoodFacts | null> {
+  let hits: ScannedFood[] = [];
+  try {
+    hits = await offSearch(name);
+  } catch {
+    return null;
+  }
+  const best = hits.find((h) => h.calories > 0 && h.name && sharesToken(name, h.name));
+  if (!best) return null;
+  const basis = best.grams && best.grams > 0 ? best.grams : 100;
+  const per100 = 100 / basis;
+  return {
+    kcal: best.calories * per100,
+    protein: best.protein * per100,
+    carbs: best.carbs * per100,
+    fat: best.fat * per100,
+    portion: basis,
+  };
+}
+
+async function fdcFacts(name: string): Promise<FoodFacts | null> {
+  if (!process.env.FDC_API_KEY) return null;
+  try {
+    const foods = await fdcSearchRaw(name, "Foundation,SR Legacy", 1);
+    if (foods.length === 0) return null;
+    const nut = readFdcNutrients(foods[0]);
+    if (nut.kcal <= 0) return null;
+    return { kcal: nut.kcal, protein: nut.protein, carbs: nut.carbs, fat: nut.fat, portion: 100 };
+  } catch {
+    return null;
+  }
+}
+
 export async function groundFoods(items: RawFood[]): Promise<RawFood[]> {
-  if (!process.env.FDC_API_KEY) return items;
   return Promise.all(
     items.map(async (item) => {
-      const grams = num(item.grams);
-      if (grams <= 0) return item;
-      try {
-        const foods = await fdcSearchRaw(item.name, "Foundation,SR Legacy", 1);
-        if (foods.length === 0) return item;
-        const nut = readFdcNutrients(foods[0]);
-        if (nut.kcal <= 0) return item;
-        const factor = grams / 100;
-        return {
-          ...item,
-          calories: Math.round(nut.kcal * factor),
-          protein: Math.round(nut.protein * factor),
-          carbs: Math.round(nut.carbs * factor),
-          fat: Math.round(nut.fat * factor),
-          grounded: true,
-        };
-      } catch {
-        return item;
-      }
+      const table = lookupFood(item.name);
+      let grams = num(item.grams);
+      if (grams <= 0) grams = table ? table.portion : PORTION_FALLBACK;
+
+      if (table) return { ...item, grams, ...scaleTo(table, grams), grounded: true };
+
+      const off = await offFacts(item.name);
+      if (off) return { ...item, grams, ...scaleTo(off, grams), grounded: true };
+
+      const fdc = await fdcFacts(item.name);
+      if (fdc) return { ...item, grams, ...scaleTo(fdc, grams), grounded: true };
+
+      return { ...item, grams, grounded: false };
     }),
   );
 }

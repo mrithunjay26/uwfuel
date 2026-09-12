@@ -1,5 +1,3 @@
-// Specific muscle groups used across logging + charts. A workout exercise's
-// `muscle` field stores one of these; users can override it per exercise.
 export const BODY_PARTS = [
   "Chest",
   "Lats",
@@ -46,7 +44,6 @@ export const BODY_PART_COLORS: Record<BodyPart, string> = {
   Other: "#a3a3a3",
 };
 
-// Coarser family for grouped views (e.g. a "by region" chart toggle).
 export const MUSCLE_FAMILY: Record<BodyPart, string> = {
   Chest: "Chest",
   Lats: "Back", "Upper Back": "Back", Traps: "Back",
@@ -57,7 +54,6 @@ export const MUSCLE_FAMILY: Record<BodyPart, string> = {
   Cardio: "Cardio", "Full Body": "Full Body", Other: "Other",
 };
 
-// Map a raw DB muscle string (e.g. "Latissimus Dorsi", "Anterior Deltoid") to a specific muscle.
 const MUSCLE_TO_PART: [RegExp, BodyPart][] = [
   [/pec|chest|sternal|clavicular/, "Chest"],
   [/lat\b|latissimus/, "Lats"],
@@ -80,7 +76,6 @@ const MUSCLE_TO_PART: [RegExp, BodyPart][] = [
   [/full body|total body|olympic/, "Full Body"],
 ];
 
-// Infer a specific muscle from an exercise name. Ordered so specific wins.
 const NAME_RULES: [RegExp, BodyPart][] = [
   [/cardio|run|jog|sprint|treadmill|cycl|bike|elliptical|rowing machine|jump rope|jumping jack|burpee|stair|sled|battle rope|\bhiit\b/, "Cardio"],
   [/calf|calves|soleus|gastroc|toe raise/, "Calves"],

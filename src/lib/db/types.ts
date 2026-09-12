@@ -37,7 +37,6 @@ export interface FoodLogEntry {
 
 export type DayFoodLog = Record<string, FoodLogEntry>;
 
-/** A reusable food the user saved (e.g. a daily protein shake) — log to any day with one tap. */
 export interface InventoryFood {
   name: string;
   calories: number;
@@ -52,19 +51,17 @@ export interface InventoryFood {
 }
 export type FoodInventory = Record<string, InventoryFood>;
 
-/** A dorm kitchen: what the student can cook with. */
 export interface KitchenProfile {
-  access: KitchenAccess;      // none | shared | full
-  appliances: string[];       // e.g. "Microwave", "Air fryer"
+  access: KitchenAccess;
+  appliances: string[];
   updated_at: string;
 }
 
-/** An item the student currently has on hand in their dorm pantry / mini-fridge. */
 export interface PantryItem {
   name: string;
-  quantity?: string;          // free text, e.g. "2 cans", "half a bag"
-  category?: string;          // produce | protein | grain | dairy | snack | condiment | frozen | other
-  image?: string;             // optional product/ingredient thumbnail (from Open Food Facts)
+  quantity?: string;
+  category?: string;
+  image?: string;
   added_at: string;
 }
 export type Pantry = Record<string, PantryItem>;
@@ -161,6 +158,15 @@ export interface DayTotals {
 
 export type MealType = "Breakfast" | "Lunch" | "Dinner" | "Snack";
 
+export interface PlanAddOn {
+  item_name: string;
+  location_id: string;
+  location_name: string;
+  estimated_calories: number;
+  estimated_protein: number;
+  estimated_cost: number;
+}
+
 export interface PlanMeal {
   meal_type: MealType;
   item_name: string;
@@ -171,6 +177,7 @@ export interface PlanMeal {
   estimated_cost: number;
   suggested_time: string;
   reasoning: string;
+  add_ons?: PlanAddOn[];
 }
 
 export interface PlanDailyTotals {
@@ -204,6 +211,15 @@ export interface ActivePlan {
   set_at: string;
 }
 
+export interface SavedPlace {
+  label: string;
+  lat: number | null;
+  lng: number | null;
+  added_at: string;
+}
+
+export type ScheduleTag = "class" | "home" | "gym" | "club" | "work" | "study" | "other";
+
 export interface ClassStop {
   id: string;
   title?: string;
@@ -213,6 +229,7 @@ export interface ClassStop {
   lat: number | null;
   lng: number | null;
   source: string;
+  tag?: ScheduleTag;
 }
 
 export type Weekday =
@@ -231,9 +248,9 @@ export type ExerciseType = "weighted" | "bodyweight" | "cardio";
 export interface LoggedSet {
   weight: number;
   reps: number;
-  distance?: number;      // cardio: miles
-  duration_sec?: number;  // cardio / timed: seconds
-  comment?: string;       // FitNotes-style per-set note
+  distance?: number;
+  duration_sec?: number;
+  comment?: string;
   is_pr?: boolean;
 }
 
@@ -241,7 +258,7 @@ export interface WorkoutLogExercise {
   name: string;
   exercise_id?: string;
   muscle?: string;
-  type?: ExerciseType;    // defaults to "weighted"
+  type?: ExerciseType;
   tip?: string;
   sets: LoggedSet[];
 }
@@ -272,7 +289,6 @@ export interface WorkoutPlanDay {
   exercises: WorkoutLogExercise[];
 }
 
-/** A reusable, indefinitely recurring seven-day training schedule. */
 export interface WorkoutPlan {
   title: string;
   split: string;

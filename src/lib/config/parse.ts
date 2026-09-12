@@ -79,7 +79,6 @@ function looseToJson(s: string): string {
 
 function tryEval(s: string): Record<string, unknown> | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
     const v = new Function(`"use strict"; return (${s});`)();
     return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
   } catch {

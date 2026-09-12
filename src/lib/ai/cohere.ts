@@ -6,41 +6,84 @@ interface CohereMessage {
   content: string;
 }
 
+export class CohereTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Cohere didn't answer within ${Math.round(ms / 1000)}s.`);
+    this.name = "CohereTimeoutError";
+  }
+}
+
+export interface CohereOptions {
+  temperature?: number;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  maxTokens?: number;
+  jsonMode?: boolean;
+}
+
 export async function callCohere(
   apiKey: string,
   prompt: string | CohereMessage[],
-  opts: { temperature?: number; signal?: AbortSignal } = {},
+  opts: CohereOptions = {},
 ): Promise<string> {
   if (!apiKey) throw new Error("No Cohere API key set. Add one in Settings to use AI features.");
 
   const messages: CohereMessage[] =
     typeof prompt === "string" ? [{ role: "user", content: prompt }] : prompt;
 
-  const response = await fetch(COHERE_CHAT_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: COHERE_MODEL,
-      messages,
-      temperature: opts.temperature ?? 0.55,
-    }),
-    signal: opts.signal,
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(cohereErrorMessage(response.status, text));
+  const ctrl = new AbortController();
+  const relay = () => ctrl.abort();
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener("abort", relay, { once: true });
   }
+  let timedOut = false;
+  const timer = opts.timeoutMs
+    ? setTimeout(() => { timedOut = true; ctrl.abort(); }, opts.timeoutMs)
+    : null;
 
-  const data = await response.json();
-  const parts = data?.message?.content || [];
-  return parts
-    .map((p: { text?: string }) => p.text || "")
-    .join("\n")
-    .trim();
+  const request = (json: boolean) =>
+    fetch(COHERE_CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: COHERE_MODEL,
+        messages,
+        temperature: opts.temperature ?? 0.55,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+        ...(json ? { response_format: { type: "json_object" } } : {}),
+      }),
+      signal: ctrl.signal,
+    });
+
+  try {
+    let response = await request(Boolean(opts.jsonMode));
+    if (!response.ok && response.status === 400 && opts.jsonMode) {
+      const text = await response.clone().text().catch(() => "");
+      if (/response_format|json/i.test(text)) response = await request(false);
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(cohereErrorMessage(response.status, text));
+    }
+
+    const data = await response.json();
+    const parts = data?.message?.content || [];
+    return parts
+      .map((p: { text?: string }) => p.text || "")
+      .join("\n")
+      .trim();
+  } catch (err) {
+    if (timedOut) throw new CohereTimeoutError(opts.timeoutMs ?? 0);
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", relay);
+  }
 }
 
 export async function testCohereKey(apiKey: string): Promise<{ ok: boolean; error?: string }> {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { onValue, ref } from "firebase/database";
+import { ref } from "firebase/database";
+import { onValue } from "@/lib/offline/db";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { PATHS } from "@/lib/db/paths";
 import type { FoodExpense } from "@/lib/db/types";

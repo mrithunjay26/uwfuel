@@ -210,7 +210,6 @@ const NON_MEAL_NAME_TERMS = [
 const NON_MEAL_CATEGORY_TERMS = ["condiment", "topping", "sauce", "spread", "add-on", "add on"];
 const MEAL_CATEGORY_TERMS = ["entree", "entrée", "bowl", "grill", "sandwich", "burger", "pizza", "pasta", "breakfast", "lunch", "dinner", "deli", "global"];
 
-/** Keeps dashboard recommendations focused on complete, purchasable meals—not add-ons. */
 export function isMealRecommendationCandidate(item: FlatMenuItem): boolean {
   if (!item.available_now || item.is_beverage || item.price < 1.5) return false;
   const name = item.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();

@@ -32,10 +32,6 @@ export interface AIWorkoutDay {
   exercises: WorkoutLogExercise[];
 }
 
-/**
- * Parse a multi-day AI plan into labeled days. Day headers are markdown
- * headings ("## Day 1 — Push") or a bold-only line ("**Day 2 — Pull**").
- */
 export function parseAIWeek(text: string): AIWorkoutDay[] {
   const days: AIWorkoutDay[] = [];
   let cur: { label: string; body: string[] } | null = null;

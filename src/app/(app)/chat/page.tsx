@@ -7,6 +7,7 @@ import { ChatBubble } from "@/components/app/ChatBubble";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useConfig } from "@/lib/config/ConfigContext";
+import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useFoodLog } from "@/lib/hooks/useFoodLog";
@@ -44,6 +45,7 @@ export default function ChatPage() {
   const handle = useUserDb();
   const { profile } = useUserProfile();
   const today = todayPacificKey();
+  const { customize } = useCustomize();
   const { totals } = useFoodLog(today);
   const { sessions } = useChatSessions();
 
@@ -242,10 +244,14 @@ ${JSON.stringify(compactMenu, null, 1)}`;
     [sessions, activeId],
   );
 
-  const inputBarOffset = "calc(80px + env(safe-area-inset-bottom))";
+  const navTop = customize.navPosition === "top";
+  const columnHeight = navTop
+    ? "calc(100dvh - 74px - env(safe-area-inset-top))"
+    : "calc(100dvh - 80px - env(safe-area-inset-bottom))";
 
   return (
-    <div className="flex flex-col" style={{ minHeight: "100dvh" }}>
+    <div className="flex flex-col overflow-hidden" style={{ height: columnHeight }}>
+      <div className="shrink-0">
       <AuroraHeader
         title="UW Fuel AI"
         subtitle={
@@ -275,9 +281,10 @@ ${JSON.stringify(compactMenu, null, 1)}`;
           </div>
         }
       />
+      </div>
 
       {!hasCohere && (
-        <div className="glass-panel mx-5 mt-4 flex items-start gap-3 rounded-[16px] p-4">
+        <div className="glass-panel mx-5 mt-4 flex shrink-0 items-start gap-3 rounded-[16px] p-4">
           <KeyRound className="mt-0.5 size-5 shrink-0 text-warning" />
           <div className="flex-1">
             <p className="text-[13px] font-bold text-ink">No AI key connected</p>
@@ -296,8 +303,7 @@ ${JSON.stringify(compactMenu, null, 1)}`;
 
       <div
         ref={scrollRef}
-        className="thin-scrollbar flex-1 overflow-y-auto px-4 py-4"
-        style={{ paddingBottom: "calc(96px + 80px + env(safe-area-inset-bottom))" }}
+        className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4"
       >
         {messages.length === 0 ? (
           <EmptyState
@@ -321,10 +327,7 @@ ${JSON.stringify(compactMenu, null, 1)}`;
         <div ref={bottomRef} />
       </div>
 
-      <div
-        className="glass-nav fixed inset-x-0 z-30 mx-auto max-w-[480px] px-4 pt-3"
-        style={{ bottom: inputBarOffset, paddingBottom: "12px", left: 0, right: 0 }}
-      >
+      <div className="glass-nav shrink-0 px-4 pb-3 pt-3">
         <div className="flex items-end gap-2">
           <textarea
             value={input}

@@ -74,7 +74,6 @@ const EQUIPMENT_COLORS: Record<string, string> = {
   Bodyweight: "bg-surface-2 text-ink-soft",
 };
 
-// Per-day focus keywords for each split — used to build a full week instantly (no AI).
 const SPLIT_DAYS: Record<ProgramTypeId, { label: string; focus: string[] }[]> = {
   ppl: [
     { label: "Push", focus: ["chest", "front delt", "side delt", "tricep", "shoulder", "press", "fly", "dip"] },
@@ -100,7 +99,6 @@ const SPLIT_DAYS: Record<ProgramTypeId, { label: string; focus: string[] }[]> = 
   custom: [{ label: "Full Body", focus: ["chest", "back", "leg", "shoulder", "arm"] }],
 };
 
-// Deterministically pick `count` exercises from the library that match a day's focus.
 function pickForDay(pool: Exercise[], focus: string[], count: number, familiar: Map<string, number>): WorkoutLogExercise[] {
   const matches = pool.filter((e) => {
     const hay = `${e.name} ${e.muscle_groups.join(" ")} ${e.category}`.toLowerCase();
@@ -702,12 +700,8 @@ function capitalizeFirst(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-/** Split instructions into discrete steps: arrays as-is, or a string broken on
- *  new lines / numbered markers ("1.)", "2.", "3)"). Each step renders on its own line. */
 function parseSteps(instructions: string | string[]): string[] {
   const arr = Array.isArray(instructions) ? instructions.map((s) => String(s).trim()).filter(Boolean) : [];
-  // A real multi-step array is used as-is; a single blob (even inside an array)
-  // falls through to be split on its internal numbered markers / new lines.
   if (arr.length > 1) return arr.map((l) => l.replace(/^\s*\d+\s*[.)]+\s*/, ""));
   const text = (arr.length === 1 ? arr[0] : String(instructions || ""))
     .replace(/^\s*steps?\s*:?\s*/i, "")

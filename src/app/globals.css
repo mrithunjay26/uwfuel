@@ -294,7 +294,6 @@ textarea::placeholder {
 }
 .aurora-blob { display: none; }
 
-/* ── Customizer: background styles ─────────────────────────────── */
 [data-bg="solid"] .aurora-field {
   background: var(--bg-base);
 }
@@ -312,7 +311,6 @@ textarea::placeholder {
     var(--bg-base);
 }
 
-/* ── Customizer: decorative floating shapes ────────────────────── */
 [data-shapes="on"] .aurora-blob {
   display: block;
   position: fixed;
@@ -341,7 +339,6 @@ textarea::placeholder {
   animation: uw-float 14s ease-in-out infinite;
 }
 
-/* ── Customizer: font family ───────────────────────────────────── */
 [data-font="system"] {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -355,11 +352,9 @@ textarea::placeholder {
   --font-display: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-/* ── Customizer: scrim color follows the theme (for photo contrast) ── */
 :root { --scrim-rgb: 248, 246, 242; }
 [data-theme="dark"] { --scrim-rgb: 8, 10, 16; }
 
-/* ── Customizer: gradient presets & photo backgrounds ──────────────── */
 [data-bg="preset"] .aurora-field {
   background: var(--bg-gradient, none), var(--bg-base);
 }
@@ -373,7 +368,6 @@ textarea::placeholder {
   background-repeat: no-repeat;
 }
 
-/* ── Customizer: themed background glyphs ──────────────────────────── */
 .motif-glyph {
   position: fixed;
   z-index: -1;
@@ -390,7 +384,6 @@ textarea::placeholder {
   .motif-glyph { animation: none; }
 }
 
-/* ── Customizer: data-adaptive warm night tone ─────────────────────── */
 [data-night="on"] .aurora-field {
   filter: brightness(0.94) saturate(0.96);
 }
@@ -403,7 +396,6 @@ textarea::placeholder {
   background: radial-gradient(120% 80% at 50% 0%, rgba(255, 168, 76, 0.12), transparent 60%);
 }
 
-/* ── Customizer: high-contrast accessibility mode ──────────────────── */
 [data-contrast="high"] {
   --ink: #05070c;
   --ink-soft: #2a313d;
@@ -425,12 +417,11 @@ textarea::placeholder {
   border-color: var(--line-strong);
 }
 
-/* ── Customizer: global corner roundness ───────────────────────────── */
 [data-corners="round"] { --ui-radius: 24px; }
 [data-corners="soft"]  { --ui-radius: 14px; }
 [data-corners="sharp"] { --ui-radius: 6px; }
 :is([data-corners="round"], [data-corners="soft"], [data-corners="sharp"])
-  :is(.glass-panel, .glass-soft, .glass-strong) {
+  :is(.glass-panel, .glass-soft, .glass-strong):not(.rounded-full) {
   border-radius: var(--ui-radius) !important;
 }
 :is([data-corners="round"], [data-corners="soft"], [data-corners="sharp"])
@@ -438,7 +429,8 @@ textarea::placeholder {
   border-radius: var(--ui-radius) !important;
 }
 
-/* ── Customizer: panel surface treatment ───────────────────────────── */
+.ui-tile { border-radius: var(--ui-radius, 12px); }
+
 [data-panel="solid"] :is(.glass-panel, .glass-strong) {
   background: var(--bg) !important;
   -webkit-backdrop-filter: none !important;
@@ -453,14 +445,47 @@ textarea::placeholder {
   border-color: var(--line-strong) !important;
 }
 [data-panel="minimal"] :is(.glass-panel, .glass-soft, .glass-strong) {
-  background: transparent !important;
+  background: color-mix(in srgb, var(--bg) 74%, transparent) !important;
   border-color: transparent !important;
   box-shadow: none !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+  backdrop-filter: blur(6px) !important;
+}
+
+[data-bg="image"] :is(.glass-panel, .glass-strong, .glass-nav) {
+  background: color-mix(in srgb, var(--surface) 88%, transparent) !important;
+}
+[data-bg="image"] .glass-soft {
+  background: color-mix(in srgb, var(--surface) 72%, transparent) !important;
+}
+
+.on-map {
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong) !important;
+  box-shadow: 0 6px 20px rgba(20, 22, 29, 0.2) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  color: var(--ink);
+}
+[data-theme="dark"] .on-map {
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6) !important;
+}
+.on-map-accent {
+  background: var(--accent) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, #000) !important;
+  color: var(--accent-contrast) !important;
+  box-shadow: 0 6px 20px rgba(20, 22, 29, 0.28) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
-/* ── Customizer: page / tab transition animations ──────────────────── */
+.seg-active {
+  background: var(--surface) !important;
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+}
+
 .page-anim, .tab-panel-anim { animation: none; }
 [data-anim="fade"]    .page-anim { animation: pg-fade 0.18s ease both; }
 [data-anim="slideup"] .page-anim { animation: pg-slideup 0.22s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
@@ -475,7 +500,6 @@ textarea::placeholder {
 @keyframes pg-slide { from { opacity: 0; transform: translate3d(16px, 0, 0); } to { opacity: 1; transform: none; } }
 @keyframes pg-scale { from { opacity: 0; transform: scale(0.972); } to { opacity: 1; transform: none; } }
 
-/* ── Customizer: calm mode (reduced motion) ────────────────────────── */
 [data-motion="calm"] *,
 [data-motion="calm"] *::before,
 [data-motion="calm"] *::after {
@@ -551,7 +575,6 @@ textarea::placeholder {
 .press { transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .press:active { transform: scale(0.96); }
 
-/* Experience customization */
 .customizer-hero {
   background:
     radial-gradient(circle at 90% 10%, var(--glow-1), transparent 45%),

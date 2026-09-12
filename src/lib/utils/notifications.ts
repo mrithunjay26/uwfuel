@@ -25,12 +25,26 @@ export interface MealReminder {
   itemName: string;
 }
 
-async function postToSW(message: unknown): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.serviceWorker) return false;
+async function activeWorker(): Promise<ServiceWorker | null> {
+  if (typeof navigator === "undefined" || !navigator.serviceWorker) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const target = reg.active || navigator.serviceWorker.controller;
-    if (!target) return false;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return null;
+    if (reg.active) return reg.active;
+    const ready = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
+    return ready?.active ?? navigator.serviceWorker.controller ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function postToSW(message: unknown): Promise<boolean> {
+  const target = await activeWorker();
+  if (!target) return false;
+  try {
     target.postMessage(message);
     return true;
   } catch {

@@ -33,6 +33,9 @@ export const PATHS = {
 
   classSchedule: (uid: string) => `users/${uid}/class_schedule_by_weekday`,
 
+  savedPlaces: (uid: string) => `users/${uid}/saved_places`,
+  savedPlace: (uid: string, id: string) => `users/${uid}/saved_places/${id}`,
+
   chatHistory: (uid: string) => `users/${uid}/chat_history`,
 
   chatSessions: (uid: string) => `users/${uid}/chat_sessions`,

@@ -14,7 +14,7 @@ const PROMPT = [
 ].join(" ");
 
 export async function POST(req: Request) {
-  let body: { imageB64?: unknown; cohereKey?: unknown; groqKey?: unknown };
+  let body: { imageB64?: unknown; cohereKey?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -22,9 +22,8 @@ export async function POST(req: Request) {
   }
   const image = body.imageB64;
   const cohereKey = typeof body.cohereKey === "string" && body.cohereKey ? body.cohereKey : undefined;
-  const groqKey = typeof body.groqKey === "string" && body.groqKey ? body.groqKey : undefined;
-  if (!cohereKey && !groqKey && !fallbackConfigured()) {
-    return NextResponse.json({ error: "Add a Cohere or Groq key in Settings to scan your pantry." }, { status: 503 });
+  if (!cohereKey && !fallbackConfigured()) {
+    return NextResponse.json({ error: "Add your Cohere key in Settings to scan your pantry." }, { status: 503 });
   }
   if (typeof image !== "string" || !image) {
     return NextResponse.json({ error: "Missing image." }, { status: 400 });
@@ -37,7 +36,6 @@ export async function POST(req: Request) {
       prompt: PROMPT,
       imageB64: image,
       cohereKey,
-      groqKey,
     });
     const items = Array.isArray(parsed.items)
       ? parsed.items

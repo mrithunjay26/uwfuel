@@ -12,7 +12,7 @@ import { useConfig } from "@/lib/config/ConfigContext";
 const REPO_URL = "https://github.com/mrithunjay26/uwfuel";
 
 const PROMISES: [React.ComponentType<{ className?: string }>, React.ReactNode][] = [
-  [KeyRound, "Bring your own AI key for personalized plans"],
+  [KeyRound, "Your own AI key — nobody else sees your data"],
   [Heart, "100% free & open source"],
 ];
 
@@ -73,7 +73,7 @@ export default function WelcomePage() {
         built for UW students.
       </h1>
       <p className="mt-2.5 text-[14px] leading-relaxed text-ink-soft">
-        Track campus dining, macros &amp; budget, powered by an AI you control. No shared server.
+        Track campus dining, macros, and your budget. Runs on your own AI key — no shared server.
       </p>
 
       <ul className="mt-6 flex flex-col gap-3.5">

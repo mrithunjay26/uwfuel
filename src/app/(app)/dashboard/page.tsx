@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Boxes, CalendarDays, Camera, ChefHat, ChevronLeft, ChevronRight, Sparkles, Target, User } from "lucide-react";
+import { BookOpen, Boxes, CalendarDays, Camera, ChefHat, ChevronLeft, ChevronRight, Route, Sparkles, Target, User } from "lucide-react";
 import { Ring } from "@/components/ui/Ring";
 import { GoalModal } from "@/components/app/GoalModal";
 import { JournalCard } from "@/components/app/JournalCard";
@@ -28,6 +28,8 @@ import {
   formatMoney,
 } from "@/lib/utils/nutrition";
 import { computeGoalAssessment } from "@/lib/utils/goals";
+import { useCustomize } from "@/lib/customize/CustomizeContext";
+import { isHomeSectionVisible, orderedHomeSections } from "@/lib/customize/homeSections";
 
 const MACRO_BARS: {
   key: "protein" | "carbs" | "fat";
@@ -45,6 +47,9 @@ export default function DashboardPage() {
   const { dailyBudget, hasCohere } = useConfig();
   const { profile, loading: profileLoading } = useUserProfile();
   const { profile: setupProfile } = useOnboardingProfile();
+  const { customize } = useCustomize();
+  const showSection = (id: string) => isHomeSectionVisible(customize, id);
+  const cardOrder = useMemo(() => orderedHomeSections(customize), [customize]);
   const today = todayPacificKey();
   const [selectedDate, setSelectedDate] = useState(today);
   const { entries, totals, loading: logLoading } = useFoodLog(selectedDate);
@@ -219,7 +224,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="mt-4 rounded-[24px] bg-gradient-to-br from-hero-from to-hero-to p-5 text-white shadow-[var(--shadow-hero)]">
+        {showSection("macros") && <div className="mt-4 rounded-[24px] bg-gradient-to-br from-hero-from to-hero-to p-5 text-white shadow-[var(--shadow-hero)]">
           <div className="flex items-center gap-5">
             <Ring
               size={104}
@@ -288,9 +293,9 @@ export default function DashboardPage() {
               `${Math.round(targetKcal - totals.calories)} kcal remaining today`
             )}
           </p>
-        </div>
+        </div>}
 
-        {!setupProfile && <div className="glass-strong mt-3 rounded-[18px] px-4 py-3">
+        {!setupProfile && showSection("budget") && <div className="glass-strong mt-3 rounded-[18px] px-4 py-3">
           <div className="flex items-center justify-between">
             <span className="text-[13px] font-bold text-ink">💵 Dining budget</span>
             {isLoading ? (
@@ -314,49 +319,136 @@ export default function DashboardPage() {
 
       <div className="px-5 pt-5 pb-6">
         <EverydayOverview today={today} />
-        {SCAN_ENABLED && (
-          <button
-            onClick={() => setScanOpen(true)}
-            className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-accent/25 bg-accent-soft px-4 py-3.5 text-left"
-          >
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-contrast">
-              <Camera className="size-[18px]" />
-            </span>
-            <div className="flex-1">
-              <p className="text-[13px] font-bold text-accent-ink">Scan a meal</p>
-              <p className="text-[11px] text-ink-soft">Snap a photo, scan a barcode, or type it in.</p>
-            </div>
-            <ChevronRight className="size-4 shrink-0 text-accent-ink/70" />
-          </button>
-        )}
 
-        <button
-          onClick={() => setInventoryOpen(true)}
-          className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-line bg-surface px-4 py-3.5 text-left"
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-accent">
-            <Boxes className="size-[18px]" />
-          </span>
-          <div className="flex-1">
-            <p className="text-[13px] font-bold text-ink">My foods</p>
-            <p className="text-[11px] text-ink-soft">Save &amp; reuse foods — shakes, snacks, go-to meals.</p>
-          </div>
-          <ChevronRight className="size-4 shrink-0 text-ink-faint" />
-        </button>
+        {cardOrder.map((id) => {
+          if (!showSection(id)) return null;
+          switch (id) {
+            case "scan":
+              return SCAN_ENABLED ? (
+                <button
+                  key={id}
+                  onClick={() => setScanOpen(true)}
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-accent/25 bg-accent-soft px-4 py-3.5 text-left"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-contrast">
+                    <Camera className="size-[18px]" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-accent-ink">Scan a meal</p>
+                    <p className="text-[11px] text-ink-soft">Snap a photo, scan a barcode, or type it in.</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-accent-ink/70" />
+                </button>
+              ) : null;
 
-        <Link
-          href="/menu?tab=pantry"
-          className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-line bg-surface px-4 py-3.5 text-left"
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-accent">
-            <ChefHat className="size-[18px]" />
-          </span>
-          <div className="flex-1">
-            <p className="text-[13px] font-bold text-ink">Dorm pantry</p>
-            <p className="text-[11px] text-ink-soft">Track what you have &amp; find recipes you can cook.</p>
-          </div>
-          <ChevronRight className="size-4 shrink-0 text-ink-faint" />
-        </Link>
+            case "today":
+              return (
+                <Link
+                  key={id}
+                  href="/today"
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-accent/30 bg-accent-soft/40 px-4 py-3.5 text-left"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-contrast">
+                    <Route className="size-[18px]" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-ink">My day &amp; campus route</p>
+                    <p className="text-[11px] text-ink-soft">Classes, meals &amp; training on a live map — step by step.</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+                </Link>
+              );
+
+            case "myfoods":
+              return (
+                <button
+                  key={id}
+                  onClick={() => setInventoryOpen(true)}
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-line bg-surface px-4 py-3.5 text-left"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-accent">
+                    <Boxes className="size-[18px]" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-ink">My foods</p>
+                    <p className="text-[11px] text-ink-soft">Save &amp; reuse foods — shakes, snacks, go-to meals.</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+                </button>
+              );
+
+            case "pantry":
+              return (
+                <Link
+                  key={id}
+                  href="/menu?tab=pantry"
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-line bg-surface px-4 py-3.5 text-left"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-accent">
+                    <ChefHat className="size-[18px]" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-ink">Dorm pantry</p>
+                    <p className="text-[11px] text-ink-soft">Track what you have &amp; find recipes you can cook.</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+                </Link>
+              );
+
+            case "guide":
+              return !hasCohere ? (
+                <Link
+                  key={id}
+                  href="/guide"
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] bg-accent px-4 py-3.5 text-left text-accent-contrast shadow-[var(--shadow-md)]"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/25 backdrop-blur-md">
+                    <Sparkles className="size-4" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[14px] font-bold">Finish setup: add your AI key</p>
+                    <p className="text-[11px] text-white/80">Step by step Cohere &amp; Firebase guide</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0" />
+                </Link>
+              ) : (
+                <Link
+                  key={id}
+                  href="/guide"
+                  className="press mb-4 flex w-full items-center gap-2.5 rounded-[16px] bg-surface-2 px-4 py-3 text-left"
+                >
+                  <BookOpen className="size-4 shrink-0 text-accent" />
+                  <span className="flex-1 text-[13px] font-semibold text-ink-soft">Setup guide &amp; help</span>
+                  <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+                </Link>
+              );
+
+            case "goal":
+              return goalAssessment && goalAssessment.status !== "no_goal" ? (
+                <Link
+                  key={id}
+                  href="/progress"
+                  className="press mb-4 flex w-full items-center gap-3 rounded-[18px] bg-surface-2 px-4 py-3.5 text-left"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
+                    <Target className="size-[18px]" />
+                  </span>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-bold text-ink">
+                      {goalWeeksLeft} wk {goalRemainderDays} days to your {goalAssessment.goalWeight} lb goal
+                    </p>
+                    <p className="text-[11px] text-ink-soft">
+                      {goalAssessment.headline} · {Math.abs(goalAssessment.remainingLbs).toFixed(1)} lbs to go
+                    </p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-ink-faint" />
+                </Link>
+              ) : null;
+
+            default:
+              return null;
+          }
+        })}
 
         {!profileLoading && !profile && (
           <button
@@ -376,52 +468,7 @@ export default function DashboardPage() {
           </button>
         )}
 
-        {!hasCohere ? (
-          <Link
-            href="/guide"
-            className="press mb-4 flex w-full items-center gap-3 rounded-[18px] bg-accent px-4 py-3.5 text-left text-accent-contrast shadow-[var(--shadow-md)]"
-          >
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/25 backdrop-blur-md">
-              <Sparkles className="size-4" />
-            </span>
-            <div className="flex-1">
-              <p className="text-[14px] font-bold">Finish setup: add your AI key</p>
-              <p className="text-[11px] text-white/80">Step by step Cohere &amp; Firebase guide</p>
-            </div>
-            <ChevronRight className="size-4 shrink-0" />
-          </Link>
-        ) : (
-          <Link
-            href="/guide"
-            className="press mb-4 flex w-full items-center gap-2.5 rounded-[16px] bg-surface-2 px-4 py-3 text-left"
-          >
-            <BookOpen className="size-4 shrink-0 text-accent" />
-            <span className="flex-1 text-[13px] font-semibold text-ink-soft">Setup guide &amp; help</span>
-            <ChevronRight className="size-4 shrink-0 text-ink-faint" />
-          </Link>
-        )}
-
-        {goalAssessment && goalAssessment.status !== "no_goal" && (
-          <Link
-            href="/progress"
-            className="press mb-4 flex w-full items-center gap-3 rounded-[18px] bg-surface-2 px-4 py-3.5 text-left"
-          >
-            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
-              <Target className="size-[18px]" />
-            </span>
-            <div className="flex-1">
-              <p className="text-[13px] font-bold text-ink">
-                {goalWeeksLeft} wk {goalRemainderDays} days to your {goalAssessment.goalWeight} lb goal
-              </p>
-              <p className="text-[11px] text-ink-soft">
-                {goalAssessment.headline} · {Math.abs(goalAssessment.remainingLbs).toFixed(1)} lbs to go
-              </p>
-            </div>
-            <ChevronRight className="size-4 shrink-0 text-ink-faint" />
-          </Link>
-        )}
-
-        <div className="flex items-center justify-between">
+        {showSection("journal") && <><div className="flex items-center justify-between">
           <h2 className="font-display text-[19px] font-extrabold text-ink">My Journal</h2>
           {profile && (
             <button
@@ -433,7 +480,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Day switcher — view & edit any past day */}
         <div className="mt-2 flex items-center justify-between rounded-[14px] bg-surface-2 px-1.5 py-1.5">
           <button onClick={() => shiftDay(-1)} aria-label="Previous day" className="press grid size-8 place-items-center rounded-full text-ink-soft">
             <ChevronLeft className="size-5" />
@@ -479,7 +525,7 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
-        </div>
+        </div></>}
       </div>
     </div>
   );

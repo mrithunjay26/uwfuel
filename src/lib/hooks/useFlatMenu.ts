@@ -13,10 +13,6 @@ import {
   type FlatMenuItem,
 } from "@/lib/menu/flattenMenu";
 
-/**
- * Loads today's flattened UW menu once. Used for campus-matching scanned foods.
- * `enabled` defers the fetch until it's actually needed (e.g. scanner opened).
- */
 export function useFlatMenu(enabled = true): { items: FlatMenuItem[]; loading: boolean } {
   const [items, setItems] = useState<FlatMenuItem[]>([]);
   const [loading, setLoading] = useState(false);

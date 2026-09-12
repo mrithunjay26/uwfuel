@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { tileConfig } from "@/lib/map/tiles";
 
 interface ClassLocationPickerProps {
   lat: number | null;
@@ -57,10 +58,8 @@ export function ClassLocationPicker({
       const map = L.map(containerRef.current, { zoomControl: true, scrollWheelZoom: false })
         .setView(center, ZOOM);
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
-        maxZoom: 19,
-      }).addTo(map);
+      const tiles = tileConfig();
+      L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: tiles.maxZoom }).addTo(map);
 
       if (lat && lng) {
         const m = L.marker([lat, lng], { draggable: true }).addTo(map);
@@ -71,7 +70,6 @@ export function ClassLocationPicker({
         markerRef.current = m;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       map.on("click", (e: any) => {
         const newLat = round6(e.latlng.lat);
         const newLng = round6(e.latlng.lng);
@@ -101,7 +99,6 @@ export function ClassLocationPicker({
         markerRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <div ref={containerRef} className={className} style={{ zIndex: 0 }} />;

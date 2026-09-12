@@ -7,28 +7,42 @@ import { TextField } from "@/components/ui/Field";
 import { GoogleIcon } from "@/components/ui/GoogleIcon";
 import { OnboardingHeader } from "@/components/onboarding/OnboardingHeader";
 import { authErrorMessage, useAuth } from "@/lib/auth/AuthContext";
+import { readStoredCustomize } from "@/lib/customize/CustomizeContext";
+import { startPagePath } from "@/lib/customize/homeSections";
 import { haptic } from "@/lib/utils/haptics";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, loading, signIn, signInWithGoogle } = useAuth();
+  const { user, loading, needsVerification, signIn, signInWithGoogle, sendReset } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "email" | "google">(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<null | "email" | "google" | "reset">(null);
 
   useEffect(() => {
-    if (!loading && user) router.replace("/dashboard");
-  }, [loading, user, router]);
+    const params = new URLSearchParams(window.location.search);
+    const prefill = params.get("email");
+    if (prefill) setEmail(prefill);
+    if (params.get("verified") === "1") setNotice("Email confirmed. Log in to get started.");
+  }, []);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    if (needsVerification) router.replace("/verify-email");
+    else router.replace(startPagePath(readStoredCustomize().startPage));
+  }, [loading, user, needsVerification, router]);
 
   async function handleEmail(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setBusy("email");
     try {
-      await signIn(email.trim(), password);
+      const signedIn = await signIn(email.trim(), password);
       haptic("success");
-      router.replace("/dashboard");
+      if (!signedIn.emailVerified) router.replace("/verify-email");
+      else router.replace(startPagePath(readStoredCustomize().startPage));
     } catch (err) {
       setError(authErrorMessage(err));
       haptic("error");
@@ -39,11 +53,32 @@ export default function LoginPage() {
 
   async function handleGoogle() {
     setError(null);
+    setNotice(null);
     setBusy("google");
     try {
       await signInWithGoogle();
       haptic("success");
-      router.replace("/dashboard");
+      router.replace(startPagePath(readStoredCustomize().startPage));
+    } catch (err) {
+      setError(authErrorMessage(err));
+      haptic("error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleReset() {
+    setError(null);
+    setNotice(null);
+    if (!email.trim()) {
+      setError("Type your email first, then tap this.");
+      return;
+    }
+    setBusy("reset");
+    try {
+      await sendReset(email.trim());
+      setNotice("Password reset link sent. Check your email.");
+      haptic("success");
     } catch (err) {
       setError(authErrorMessage(err));
       haptic("error");
@@ -57,7 +92,7 @@ export default function LoginPage() {
       <OnboardingHeader onBack={() => router.push("/welcome")} />
 
       <h1 className="mt-6 font-display text-[26px] font-extrabold text-ink">Welcome back</h1>
-      <p className="mt-1.5 text-[14px] text-ink-soft">Sign in to your UW Fuel account.</p>
+      <p className="mt-1.5 text-[14px] text-ink-soft">Log in to UW Fuel.</p>
 
       <form onSubmit={handleEmail} className="mt-7 flex flex-col gap-4">
         <TextField
@@ -65,7 +100,7 @@ export default function LoginPage() {
           type="email"
           inputMode="email"
           autoComplete="email"
-          placeholder="you@example.com"
+          placeholder="you@uw.edu"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
@@ -79,10 +114,19 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
         />
+        {notice && <p className="rounded-[10px] bg-success/10 px-3 py-2 text-[13px] font-medium text-success">{notice}</p>}
         {error && <p className="rounded-[10px] bg-danger/10 px-3 py-2 text-[13px] font-medium text-danger">{error}</p>}
         <Button type="submit" full size="lg" loading={busy === "email"}>
           Log in
         </Button>
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={busy === "reset"}
+          className="self-center text-[13px] font-semibold text-accent-ink disabled:opacity-60"
+        >
+          Forgot your password?
+        </button>
         <div className="flex items-center gap-3 text-[12px] text-ink-faint">
           <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
         </div>
@@ -100,9 +144,9 @@ export default function LoginPage() {
 
       <div className="flex-1" />
       <p className="mt-8 text-center text-[13px] text-ink-faint">
-        New here?{" "}
+        No account yet?{" "}
         <button onClick={() => router.push("/signup")} className="font-semibold text-accent-ink">
-          Create an account
+          Sign up
         </button>
       </p>
     </div>

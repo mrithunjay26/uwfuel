@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onValue, ref } from "firebase/database";
+import { ref } from "firebase/database";
+import { onValue } from "@/lib/offline/db";
 import { PATHS } from "@/lib/db/paths";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import type { ActiveWorkoutPlan, WorkoutPlanDay } from "@/lib/db/types";

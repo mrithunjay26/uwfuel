@@ -72,7 +72,6 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
       ...current,
       is_rest: false,
       label: current.label === "Rest" ? "Workout" : current.label,
-      // Preserve the exact prior exercise name so its logged history carries over.
       exercises: [...current.exercises, { name, sets: Array.from({ length: 3 }, () => ({ weight: 0, reps: 10 })) }],
     }));
   }
@@ -202,7 +201,7 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
 
           <div className="mt-4 flex gap-2">
             <button onClick={saveAndActivate} className="press flex flex-1 items-center justify-center gap-2 rounded-[13px] bg-accent py-3 text-[13px] font-bold text-accent-contrast"><CalendarCheck2 className="size-4" /> Save &amp; set schedule</button>
-            <button onClick={removeCurrent} aria-label="Delete plan" className="press grid size-11 place-items-center rounded-[13px] bg-danger/10 text-danger"><Trash2 className="size-4" /></button>
+            <button onClick={removeCurrent} aria-label="Delete plan" className="press ui-tile grid size-11 place-items-center bg-danger/10 text-danger"><Trash2 className="size-4" /></button>
           </div>
           {message && <p className="mt-2 text-center text-[11px] font-semibold text-success">{message}</p>}
         </div>
@@ -216,8 +215,6 @@ export function WorkoutPlanStudio({ focusPlanId, exerciseNames }: { focusPlanId:
   );
 }
 
-// Log-tab-style exercise search: recents first (last done + count), fuzzy, plus
-// a "add new" option. Adds the exact chosen name so history carries into the logger.
 function PlanExercisePicker({
   directory, stats, today, onAdd,
 }: {

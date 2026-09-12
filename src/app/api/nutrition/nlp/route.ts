@@ -7,17 +7,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  let body: { text?: unknown; cohereKey?: unknown; groqKey?: unknown };
+  let body: { text?: unknown; cohereKey?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Bad request." }, { status: 400 });
   }
   const cohereKey = typeof body.cohereKey === "string" && body.cohereKey ? body.cohereKey : undefined;
-  const groqKey = typeof body.groqKey === "string" && body.groqKey ? body.groqKey : undefined;
-  if (!cohereKey && !groqKey && !fallbackConfigured()) {
+  if (!cohereKey && !fallbackConfigured()) {
     return NextResponse.json(
-      { error: "Add a Cohere or Groq key in Settings to analyze meals." },
+      { error: "Add your Cohere key in Settings to analyze meals." },
       { status: 503 },
     );
   }
@@ -26,7 +25,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Describe what you ate." }, { status: 400 });
   }
   try {
-    const result = await visionAnalyze({ text, cohereKey, groqKey });
+    const result = await visionAnalyze({ text, cohereKey });
     const items: ScannedFood[] = (await groundFoods(result.items)).map((f) => ({
       ...f,
       source: "nlp" as const,

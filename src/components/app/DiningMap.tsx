@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { LocationGroup, FlatMenuItem } from "@/lib/menu/flattenMenu";
+import { tileConfig } from "@/lib/map/tiles";
 
 interface DiningMapProps {
   groups: LocationGroup[];
@@ -11,10 +12,21 @@ interface DiningMapProps {
   onLocationSelect?: (locationId: string) => void;
   userLocation?: { lat: number; lng: number } | null;
   className?: string;
+  scrollZoom?: boolean;
+  zoomControl?: boolean;
 }
 
 const UW_CENTER: [number, number] = [47.6553, -122.3035];
 const UW_ZOOM = 15;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 export function DiningMap({
   groups,
@@ -24,6 +36,8 @@ export function DiningMap({
   onLocationSelect,
   userLocation,
   className,
+  scrollZoom = false,
+  zoomControl = true,
 }: DiningMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<unknown>(null);
@@ -43,13 +57,12 @@ export function DiningMap({
         });
 
         if (!containerRef.current) return;
-        const map = L.map(containerRef.current, { zoomControl: true, scrollWheelZoom: false })
+        const map = L.map(containerRef.current, { zoomControl: false, scrollWheelZoom: scrollZoom })
           .setView(UW_CENTER, UW_ZOOM);
 
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
-          maxZoom: 19,
-        }).addTo(map);
+        const tiles = tileConfig();
+        L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: tiles.maxZoom }).addTo(map);
+        if (zoomControl) L.control.zoom({ position: "bottomright" }).addTo(map);
 
         groups.forEach((group) => {
           const coords = coordsByGroup[group.name];
@@ -61,6 +74,8 @@ export function DiningMap({
           const statusLabel = group.isOpen ? "Open now" : "Closed";
           const bgColor = group.isOpen ? "#7c6cf0" : "#9a97ac";
           const locId = locationIdByGroup[group.name] || "";
+          const name = escapeHtml(group.name);
+          const directions = `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=walking`;
 
           const icon = L.divIcon({
             className: "",
@@ -72,26 +87,30 @@ export function DiningMap({
           const viewMenuBtn = group.isOpen && locId
             ? `<button
                 onclick="window.__diningMapSelect && window.__diningMapSelect('${locId}')"
-                style="margin-top:8px;width:100%;background:#7c6cf0;color:#fff;border:none;border-radius:8px;padding:6px 0;font-size:12px;font-weight:700;cursor:pointer;">
-                View menu →
+                style="margin-top:8px;width:100%;background:#f1f0fb;color:#4f3fd0;border:none;border-radius:10px;padding:7px 0;font-size:12px;font-weight:700;cursor:pointer;">
+                See the full menu
               </button>`
             : "";
 
           const popupHtml = `
-            <div style="font-family:system-ui,sans-serif;min-width:190px;max-width:250px">
-              <div style="font-weight:800;font-size:14px;margin-bottom:4px">${group.name}</div>
+            <div style="font-family:system-ui,sans-serif;min-width:200px;max-width:250px">
+              <div style="font-weight:800;font-size:14px;margin-bottom:6px">${name}</div>
+              <a href="${directions}" target="_blank" rel="noreferrer"
+                 style="display:flex;align-items:center;justify-content:center;gap:6px;background:#6c5cf2;color:#fff;border-radius:10px;padding:8px 0;font-size:12px;font-weight:700;text-decoration:none;margin-bottom:8px">
+                ➜ Walk me there
+              </a>
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
                 <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};display:inline-block"></span>
                 <span style="font-size:12px;font-weight:600;color:${statusColor}">${statusLabel}</span>
               </div>
               ${topItems.length > 0 ? `
-                <div style="font-size:11px;font-weight:700;color:#6b6880;margin-bottom:4px">TODAY'S MENU</div>
-                ${topItems.map(i => `
+                <div style="font-size:11px;font-weight:700;color:#6b6880;margin-bottom:4px">ON THE MENU TODAY</div>
+                ${topItems.map((i) => `
                   <div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #f0f0f0">
-                    <span style="font-size:12px;font-weight:600">${i.name.slice(0, 26)}${i.name.length > 26 ? "…" : ""}</span>
+                    <span style="font-size:12px;font-weight:600">${escapeHtml(i.name.slice(0, 26))}${i.name.length > 26 ? "…" : ""}</span>
                     <span style="font-size:11px;color:#888;margin-left:6px">${i.calories ? i.calories + " cal" : ""}</span>
                   </div>`).join("")}
-              ` : `<div style="font-size:12px;color:#9a97ac">No menu data today</div>`}
+              ` : `<div style="font-size:12px;color:#9a97ac">No menu today</div>`}
               ${viewMenuBtn}
             </div>`;
 
@@ -101,9 +120,8 @@ export function DiningMap({
         });
 
         mapRef.current = map;
-      } catch (e) {
-        console.warn("Leaflet failed to load:", e);
-      }
+        setTimeout(() => { if (mapRef.current === map) map.invalidateSize(); }, 120);
+      } catch {}
     }
 
     if (!document.getElementById("leaflet-css")) {
@@ -122,7 +140,6 @@ export function DiningMap({
         mapRef.current = null;
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groups.length]);
 
   useEffect(() => {
@@ -148,9 +165,7 @@ export function DiningMap({
 
       const userIcon = L.divIcon({
         className: "",
-        html: `<div style="position:relative">
-          <div style="width:16px;height:16px;background:#3b82f6;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,0.3);animation:pulse 2s infinite"></div>
-        </div>`,
+        html: `<div style="width:16px;height:16px;background:#3b82f6;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 3px rgba(59,130,246,0.3)"></div>`,
         iconSize: [16, 16],
         iconAnchor: [8, 8],
       });
@@ -158,14 +173,12 @@ export function DiningMap({
       const marker = L.marker([userLocation.lat, userLocation.lng], {
         icon: userIcon,
         zIndexOffset: 1000,
-        title: "Your location",
+        title: "You",
       }).addTo(map);
-      marker.bindPopup("<b>You are here</b>");
+      marker.bindPopup("<b>You're here</b>");
       userMarkerRef.current = marker;
     }).catch(() => {});
   }, [userLocation]);
 
-  return (
-    <div ref={containerRef} className={className} style={{ zIndex: 0 }} />
-  );
+  return <div ref={containerRef} className={className} style={{ zIndex: 0 }} />;
 }

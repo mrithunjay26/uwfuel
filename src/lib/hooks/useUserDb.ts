@@ -20,6 +20,5 @@ export function useUserDb(): UserDbHandle | null {
   return useMemo(() => {
     if (!user || !ready) return null;
     return { db: getUserFirebase(user.uid, firebase).db, uid: user.uid };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, ready, personalUrl]);
 }

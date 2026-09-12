@@ -117,31 +117,31 @@ export default function AdaptiveSetupPage() {
       <div className="mt-4 flex gap-1.5">{[0, 1, 2, 3].map((index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index <= step ? "bg-accent" : "bg-line-strong"}`} />)}</div>
 
       {step === 0 && <section className="mt-6">
-        <Header icon={<Home />} title="How do you eat at UW?" detail="We’ll only show plans that fit your living situation." />
+        <Header icon={<Home />} title="How do you eat at UW?" detail="Only the plans that fit where you live." />
         <div className="mt-5 grid grid-cols-2 gap-3">{HOUSING.map((option) => <button key={option.id} onClick={() => setHousing(option.id)} className={`rounded-[18px] border p-4 text-left ${housing === option.id ? "border-accent bg-accent-soft" : "border-line bg-surface"}`}><p className="text-[14px] font-extrabold text-ink">{option.label}</p><p className="mt-1 text-[11px] text-ink-soft">{option.detail}</p></button>)}</div>
         {planOptions.length > 0 && <><p className="mt-5 text-[12px] font-bold uppercase tracking-wide text-ink-faint">Dining Plan</p><div className="mt-2 flex flex-col gap-2">{planOptions.map((option) => <button key={`${option.program}-${option.level}`} onClick={() => setPlan(option)} className={`flex items-center gap-3 rounded-[16px] border px-4 py-3 text-left ${plan?.program === option.program && plan.level === option.level ? "border-accent bg-accent-soft" : "border-line bg-surface"}`}><span className="grid size-9 place-items-center rounded-full bg-surface-2 text-[12px] font-extrabold text-accent">{option.level}</span><span className="min-w-0 flex-1"><span className="block text-[13px] font-bold text-ink">{option.label} · ${option.quarterly_amount.toLocaleString()}/quarter</span><span className="block text-[11px] text-ink-soft">{option.daily_guide ? `$${option.daily_guide}/day guide · ` : ""}{option.intended_usage}</span></span>{plan?.program === option.program && plan.level === option.level && <Check className="size-4 text-accent" />}</button>)}</div></>}
       </section>}
 
       {step === 1 && <section className="mt-6">
-        <Header icon={<DollarSign />} title="Two wallets, zero guesswork" detail="Dining Plan stays separate from groceries and off-campus food." />
+        <Header icon={<DollarSign />} title="You have two wallets" detail="Dining Plan money is separate from grocery and off-campus money." />
         {plan && <label className="mt-5 block rounded-[18px] bg-accent-soft p-4"><span className="text-[12px] font-bold text-accent-ink">Current Dining Plan balance (optional)</span><span className="mt-1 block text-[11px] text-ink-soft">Useful if you’re joining mid-quarter. Update it anytime.</span><input type="number" min={0} value={currentBalance} onChange={(event) => setCurrentBalance(event.target.value)} placeholder={`Up to $${plan.quarterly_amount}`} className="mt-3 w-full rounded-[12px] border border-accent/20 bg-surface px-3 py-3 text-[15px] font-bold text-ink outline-none" /></label>}
         <div className="mt-4 grid grid-cols-2 gap-3"><MoneyField label="Personal food / month" value={monthlyBudget} onChange={setMonthlyBudget} /><MoneyField label="Grocery target" value={groceryTarget} onChange={setGroceryTarget} /></div>
-        <p className="mt-3 rounded-[14px] bg-surface-2 px-4 py-3 text-[11px] leading-relaxed text-ink-soft">Groceries are charged when purchased. Eating them later changes nutrition, not spending—so they are never double-counted.</p>
+        <p className="mt-3 rounded-[14px] bg-surface-2 px-4 py-3 text-[11px] leading-relaxed text-ink-soft">Groceries hit your budget the day you buy them. Eating them later only changes your macros, so nothing gets counted twice.</p>
       </section>}
 
       {step === 2 && <section className="mt-6">
-        <Header icon={<CookingPot />} title="What can you realistically cook?" detail="Recommendations should fit your kitchen, not an imaginary one." />
+        <Header icon={<CookingPot />} title="What can you realistically cook?" detail="Recipes will match the kitchen you actually have." />
         <div className="mt-5 grid grid-cols-3 gap-2">{([['none','No kitchen'],['shared','Shared'],['full','Full kitchen']] as [KitchenAccess,string][]).map(([id,label]) => <button key={id} onClick={() => setKitchen(id)} className={`rounded-[15px] border px-2 py-3 text-[12px] font-bold ${kitchen === id ? "border-accent bg-accent text-accent-contrast" : "border-line bg-surface text-ink-soft"}`}>{label}</button>)}</div>
         <label className="mt-5 block text-[12px] font-bold text-ink">Cooked meals per week: {cookedMeals}<input type="range" min={0} max={14} value={cookedMeals} onChange={(event) => setCookedMeals(Number(event.target.value))} className="mt-3 w-full accent-[var(--accent)]" /></label>
       </section>}
 
       {step === 3 && <section className="mt-6">
-        <Header icon={<ShieldCheck />} title="Food rules we must respect" detail="Hard exclusions are applied before budget, macros, routing, or AI." />
+        <Header icon={<ShieldCheck />} title="Food you don't eat" detail="Nothing you list here shows up in a plan. Not for budget, not for macros." />
         <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-ink-faint">Eating styles</p><div className="mt-2 flex flex-wrap gap-2">{STYLES.map((option) => <Chip key={option.id} active={styles.includes(option.id)} onClick={() => toggle(styles, option.id, setStyles)}>{option.label}</Chip>)}</div>
         <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-ink-faint">Allergens</p><div className="mt-2 flex flex-wrap gap-2">{ALLERGENS.map((allergen) => <Chip key={allergen} active={allergens.includes(allergen)} onClick={() => toggle(allergens, allergen, setAllergens)}>{allergen}</Chip>)}</div>
         <label className="mt-4 block text-[12px] font-bold text-ink">Other ingredients to never suggest<input value={exclusions} onChange={(event) => setExclusions(event.target.value)} placeholder="Pork, alcohol, mushrooms…" className="mt-2 w-full rounded-[12px] border border-line bg-surface-2 px-3 py-3 text-[13px] text-ink outline-none focus:border-accent" /></label>
-        <Toggle label="Cross-contact sensitive" detail="Block items unless their status is known." value={crossContact} onChange={setCrossContact} />
-        {!crossContact && <Toggle label="Allow unknown items with a warning" detail="Never labels them verified-safe." value={allowUnknown} onChange={setAllowUnknown} />}
+        <Toggle label="Cross-contact sensitive" detail="Hide anything that doesn't clearly say it's safe." value={crossContact} onChange={setCrossContact} />
+        {!crossContact && <Toggle label="Allow unknown items with a warning" detail="Show them, but flag that we can't confirm." value={allowUnknown} onChange={setAllowUnknown} />}
       </section>}
 
       <div className="flex-1" />

@@ -5,8 +5,8 @@ import type { Customize } from "@/lib/customize/types";
 
 export interface AccountConfig {
   cohereKey: string | null;
-  groqKey: string | null;
   firebase: FirebaseClientConfig | null;
+  firebaseSealed: string | null;
   dailyBudget: number;
   showWorkoutTabs: boolean;
   remindersOn: boolean;
@@ -19,8 +19,8 @@ const accountPath = (uid: string) => `users/${uid}/account`;
 export function defaultAccountConfig(): AccountConfig {
   return {
     cohereKey: null,
-    groqKey: null,
     firebase: null,
+    firebaseSealed: null,
     dailyBudget: DEFAULT_DAILY_BUDGET,
     showWorkoutTabs: true,
     remindersOn: false,
@@ -32,11 +32,11 @@ function parseAccount(raw: unknown): AccountConfig {
   const fb = v.firebase_config;
   return {
     cohereKey: typeof v.cohere_key === "string" && v.cohere_key ? v.cohere_key : null,
-    groqKey: typeof v.groq_key === "string" && v.groq_key ? v.groq_key : null,
     firebase:
       fb && typeof fb === "object" && typeof (fb as Record<string, unknown>).databaseURL === "string"
         ? (fb as unknown as FirebaseClientConfig)
         : null,
+    firebaseSealed: typeof fb === "string" && fb ? fb : null,
     dailyBudget:
       typeof v.daily_budget === "number" && v.daily_budget > 0
         ? v.daily_budget
@@ -59,28 +59,13 @@ export async function getAccountConfigOnce(uid: string): Promise<AccountConfig> 
   return parseAccount(snap.exists() ? snap.val() : {});
 }
 
-function cleanFirebaseConfig(cfg: FirebaseClientConfig | null): Record<string, string> | null {
-  if (!cfg) return null;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(cfg)) {
-    if (typeof v === "string" && v) out[k] = v;
-  }
-  return out;
-}
 
 export async function writeCohereKey(uid: string, key: string | null): Promise<void> {
   await update(ref(getDiningDb(), accountPath(uid)), { cohere_key: key ?? null });
 }
 
-export async function writeGroqKey(uid: string, key: string | null): Promise<void> {
-  await update(ref(getDiningDb(), accountPath(uid)), { groq_key: key ?? null });
-}
-
-export async function writeFirebaseConfig(
-  uid: string,
-  cfg: FirebaseClientConfig | null,
-): Promise<void> {
-  await update(ref(getDiningDb(), accountPath(uid)), { firebase_config: cleanFirebaseConfig(cfg) });
+export async function writeFirebaseConfig(uid: string, sealed: string | null): Promise<void> {
+  await update(ref(getDiningDb(), accountPath(uid)), { firebase_config: sealed });
 }
 
 export async function writeDailyBudget(uid: string, value: number): Promise<void> {
@@ -116,17 +101,12 @@ export async function writeAccountFields(
   uid: string,
   fields: Partial<{
     cohere_key: string | null;
-    groq_key: string | null;
-    firebase_config: FirebaseClientConfig | null;
+    firebase_config: string | null;
     daily_budget: number;
     show_workout_tabs: boolean;
     reminders_on: boolean;
   }>,
 ): Promise<void> {
   if (Object.keys(fields).length === 0) return;
-  const payload: Record<string, unknown> = { ...fields };
-  if ("firebase_config" in payload) {
-    payload.firebase_config = cleanFirebaseConfig(fields.firebase_config ?? null);
-  }
-  await update(ref(getDiningDb(), accountPath(uid)), payload);
+  await update(ref(getDiningDb(), accountPath(uid)), { ...fields });
 }

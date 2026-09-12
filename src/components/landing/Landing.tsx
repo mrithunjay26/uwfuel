@@ -76,9 +76,9 @@ function Hero() {
           <span className="bg-gradient-to-r from-accent to-fab bg-clip-text text-transparent">stay on budget.</span>
         </h1>
         <p className="mt-4 max-w-md text-[15px] leading-relaxed text-ink-soft md:text-[17px]">
-          UW Fuel turns live campus dining data into AI meal plans that fit your goals
-          <b className="font-semibold text-ink"> and your budget</b>, plus a full workout logger,
-          progress charts, and class aware routing. Powered by an AI key <b className="font-semibold text-ink">you</b> control.
+          UW Fuel reads live campus dining menus and builds meal plans that fit your goals
+          <b className="font-semibold text-ink"> and your budget</b>, plus a workout logger,
+          progress charts, and routing between classes. Runs on an AI key <b className="font-semibold text-ink">you</b> control.
         </p>
         <div className="mt-7 flex flex-wrap items-center gap-3">
           <Link href="/signup" className="press inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-[15px] font-bold text-accent-contrast shadow-[var(--shadow-md)]">

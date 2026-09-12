@@ -9,6 +9,7 @@ import {
   Dumbbell,
   Home,
   MessageSquare,
+  Route,
   UtensilsCrossed,
   type LucideIcon,
 } from "lucide-react";
@@ -16,9 +17,10 @@ import { cn } from "@/lib/utils/cn";
 import { haptic } from "@/lib/utils/haptics";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
-import type { FabShape, NavSize } from "@/lib/customize/types";
+import type { FabShape, NavSize, QuickAction } from "@/lib/customize/types";
 import { AuroraField } from "@/components/app/AuroraField";
 import { InstallBanner } from "@/components/app/InstallBanner";
+import { SyncStatus } from "@/components/app/SyncStatus";
 
 interface Tab { href: string; label: string; icon: LucideIcon }
 
@@ -34,40 +36,41 @@ const FAB_RADIUS: Record<FabShape, string> = {
   square: "rounded-[14px]",
 };
 
-const QUICK_ACTIONS = {
-  plan: { href: "/plan", label: "Plan", icon: CalendarCheck2 },
-  workout: { href: "/workout", label: "Train", icon: Dumbbell },
-  log: { href: "/log", label: "Log", icon: ClipboardList },
-  chat: { href: "/chat", label: "Chat", icon: MessageSquare },
-} as const;
+const NAV_PAGES: Record<QuickAction, Tab> = {
+  dashboard: { href: "/dashboard", label: "Home",     icon: Home },
+  menu:      { href: "/menu",      label: "Dining",   icon: UtensilsCrossed },
+  plan:      { href: "/plan",      label: "Plan",     icon: CalendarCheck2 },
+  today:     { href: "/today",     label: "My Day",   icon: Route },
+  chat:      { href: "/chat",      label: "Chat",     icon: MessageSquare },
+  progress:  { href: "/progress",  label: "Progress", icon: BarChart2 },
+  workout:   { href: "/workout",   label: "Train",    icon: Dumbbell },
+  log:       { href: "/log",       label: "Log",      icon: ClipboardList },
+};
+const WORKOUT_PAGES: QuickAction[] = ["workout", "log"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { showWorkoutTabs } = useConfig();
   const { customize } = useCustomize();
   const dims = NAV_SIZES[customize.navSize] ?? NAV_SIZES.default;
-  const primary = QUICK_ACTIONS[customize.primaryAction] ?? QUICK_ACTIONS.plan;
-  const secondary = QUICK_ACTIONS[customize.secondaryAction] ?? QUICK_ACTIONS.log;
+  const primaryKey: QuickAction = customize.primaryAction in NAV_PAGES ? customize.primaryAction : "plan";
+  const primary = NAV_PAGES[primaryKey];
+  const secondary = NAV_PAGES[customize.secondaryAction] ?? NAV_PAGES.log;
   const PrimaryIcon = primary.icon;
   const SecondaryIcon = secondary.icon;
   const primaryActive = isRouteActive(pathname, primary.href);
   const navTop = customize.navPosition === "top";
   const workoutOled = pathname.startsWith("/log") && customize.workoutOled;
 
-  const leftTabs: Tab[] = [
-    { href: "/dashboard", label: "Home",   icon: Home },
-    { href: "/menu",      label: "Dining", icon: UtensilsCrossed },
-  ];
-  const rightTabs: Tab[] = [
-    { href: "/chat",     label: "Chat",     icon: MessageSquare },
-    { href: "/progress", label: "Progress", icon: BarChart2 },
-    ...(showWorkoutTabs
-      ? [
-          { href: "/workout", label: "Train", icon: Dumbbell },
-          { href: "/log",     label: "Log",   icon: ClipboardList },
-        ]
-      : []),
-  ];
+  const hidden = new Set<string>(customize.navHidden ?? []);
+  const tabs = (Object.keys(NAV_PAGES) as QuickAction[])
+    .filter((key) => key !== primaryKey)
+    .filter((key) => showWorkoutTabs || !WORKOUT_PAGES.includes(key))
+    .filter((key) => !hidden.has(key))
+    .map((key) => NAV_PAGES[key]);
+  const split = Math.ceil(tabs.length / 2);
+  const leftTabs = tabs.slice(0, split);
+  const rightTabs = tabs.slice(split);
 
   const isActive = (href: string) => isRouteActive(pathname, href);
 
@@ -79,11 +82,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div key={pathname} className="page-anim">{children}</div>
       </div>
 
+      <SyncStatus />
       <InstallBanner />
 
       <nav className={`app-navigation fixed inset-x-0 z-40 ${navTop ? "top-0" : "bottom-0"}`}>
         <div className={`relative mx-auto max-w-[480px] px-2 ${navTop ? "pt-[max(env(safe-area-inset-top),8px)]" : "pb-[max(env(safe-area-inset-bottom),8px)]"}`}>
-          {secondary.href !== primary.href && (
+          {customize.showReachShortcut && secondary.href !== primary.href && (
             <Link
               href={secondary.href}
               onClick={() => haptic("light")}
@@ -93,17 +97,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <SecondaryIcon className="size-[18px]" />
             </Link>
           )}
-          <div className="glass-nav relative flex items-center justify-between rounded-[26px] px-1.5 py-2">
-
-            {leftTabs.map((t) => (
-              <NavItem key={t.href} {...t} active={isActive(t.href)} dims={dims} showLabel={customize.navLabels} />
-            ))}
+          <div className="glass-nav relative flex items-center rounded-[26px] px-1.5 py-2">
+            <div className="flex min-w-0 flex-1 items-center justify-around">
+              {leftTabs.map((t) => (
+                <NavItem key={t.href} {...t} active={isActive(t.href)} dims={dims} showLabel={customize.navLabels} />
+              ))}
+            </div>
 
             <Link
               href={primary.href}
               onClick={() => haptic("medium")}
               className={cn(
-                "press grid place-items-center shadow-[var(--shadow-fab)]",
+                "press mx-1 grid shrink-0 place-items-center shadow-[var(--shadow-fab)]",
                 customize.navMode === "fab" && (navTop ? "translate-y-3" : "-translate-y-3"),
                 FAB_RADIUS[customize.fabShape] ?? FAB_RADIUS.squircle,
                 primaryActive
@@ -116,10 +121,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <PrimaryIcon style={{ width: dims.icon + 1, height: dims.icon + 1 }} strokeWidth={primaryActive ? 2.5 : 2} />
             </Link>
 
-            {rightTabs.map((t) => (
-              <NavItem key={t.href} {...t} active={isActive(t.href)} dims={dims} showLabel={customize.navLabels} />
-            ))}
-
+            <div className="flex min-w-0 flex-1 items-center justify-around">
+              {rightTabs.map((t) => (
+                <NavItem key={t.href} {...t} active={isActive(t.href)} dims={dims} showLabel={customize.navLabels} />
+              ))}
+            </div>
           </div>
         </div>
       </nav>
@@ -150,18 +156,19 @@ function NavItem({
     <Link
       href={href}
       onClick={() => haptic("light")}
+      aria-label={label}
       className={cn(
-        "press relative flex flex-col items-center gap-0.5 py-1 font-semibold transition",
+        "press relative flex min-w-0 flex-1 flex-col items-center gap-0.5 py-1 font-semibold transition",
         dims.label,
         active ? "text-accent" : "text-ink-faint",
       )}
-      style={{ width: dims.item }}
+      style={{ maxWidth: dims.item }}
     >
       {active && (
         <span className="absolute -top-0.5 h-1 w-1 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
       )}
       <Icon style={{ width: dims.icon, height: dims.icon }} strokeWidth={active ? 2.5 : 2} />
-      {showLabel && <span>{label}</span>}
+      {showLabel && <span className="max-w-full truncate">{label}</span>}
     </Link>
   );
 }

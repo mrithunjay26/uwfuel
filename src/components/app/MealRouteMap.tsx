@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { tileConfig } from "@/lib/map/tiles";
 
 export interface RoutePoint {
   lat: number;
@@ -44,7 +45,8 @@ export function MealRouteMap({ origin, destination, color = "#6c5cf2", className
         attributionControl: false,
       });
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+      const tiles = tileConfig();
+      L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: tiles.maxZoom }).addTo(map);
 
       const startIcon = L.divIcon({
         className: "",
@@ -92,7 +94,6 @@ export function MealRouteMap({ origin, destination, color = "#6c5cf2", className
         mapRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <div ref={containerRef} className={className} style={{ zIndex: 0 }} />;

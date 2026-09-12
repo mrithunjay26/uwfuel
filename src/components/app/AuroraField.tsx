@@ -3,8 +3,6 @@
 import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { SHAPE_MOTIFS } from "@/lib/customize/types";
 
-// Fixed, hand-placed scatter so decorations never overlap the same way twice
-// yet stay deterministic (no layout shift between renders).
 const MOTIF_SPOTS = [
   { top: "5%",  left: "8%",  size: 30, d: 13, delay: 0 },
   { top: "11%", left: "82%", size: 26, d: 15, delay: 1.5 },

@@ -3,12 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Sparkles, X } from "lucide-react";
 
-// Baked into the bundle at build time. The live value is fetched from
-// /api/version (the deployed server's baked value). When a deploy bumps the
-// build, a stale (e.g. bookmarked / home-screen) client keeps its old baked
-// value while the server returns the new one — that mismatch is how we know an
-// update is waiting. (Using the route, not a static file, avoids false
-// positives from a committed version.json that doesn't match the build.)
 const BUILD_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "dev";
 
 export function UpdateBanner() {
@@ -28,7 +22,6 @@ export function UpdateBanner() {
         setDismissed(false);
       }
     } catch {
-      // offline or blocked — nothing to do
     }
   }, []);
 
@@ -63,9 +56,7 @@ export function UpdateBanner() {
         await Promise.all(keys.map((k) => caches.delete(k)));
       }
     } catch {
-      // even if cleanup fails, force a fresh load below
     }
-    // Hard reload with a cache-busting param so iOS doesn't serve the old shell.
     const url = new URL(window.location.href);
     url.searchParams.set("_v", String(Date.now()));
     window.location.replace(url.toString());

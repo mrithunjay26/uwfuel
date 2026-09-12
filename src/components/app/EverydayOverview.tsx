@@ -14,6 +14,8 @@ import { useConfig } from "@/lib/config/ConfigContext";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { computeBudgetSnapshot } from "@/lib/budget/compute";
 import { buildDailyAgenda } from "@/lib/agenda/build";
+import { useCustomize } from "@/lib/customize/CustomizeContext";
+import { isHomeSectionVisible } from "@/lib/customize/homeSections";
 import { filterSafeCandidates } from "@/lib/dietary/safety";
 import { mergeClassSchedules, parseIcsSchedule } from "@/lib/schedule/ics";
 import { saveClassSchedule, saveFoodExpense, setOnboardingChecklistHidden } from "@/lib/db/userDb";
@@ -21,6 +23,8 @@ import { workoutDayForDate } from "@/lib/workout/plans";
 import type { FoodExpenseCategory, FoodFundingSource } from "@/lib/db/types";
 
 export function EverydayOverview({ today }: { today: string }) {
+  const { customize } = useCustomize();
+  const show = (id: string) => isHomeSectionVisible(customize, id);
   const handle = useUserDb();
   const { profile: setup, loading: setupLoading } = useOnboardingProfile();
   const { expenses } = useFoodExpenses();
@@ -51,7 +55,6 @@ export function EverydayOverview({ today }: { today: string }) {
     setExpenseAmount(""); setExpenseOpen(false); setSaving(false);
   }
 
-
   async function importCalendar(file: File) {
     if (!handle) return;
     const imported = parseIcsSchedule(await file.text());
@@ -76,12 +79,12 @@ export function EverydayOverview({ today }: { today: string }) {
   ];
 
   return <div className="mb-6 flex flex-col gap-4">
-    <section className="glass-panel rounded-[22px] p-4">
-      <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-accent">Today, already figured out</p><h2 className="mt-1 font-display text-[18px] font-extrabold text-ink">Your next best moves</h2></div><Sparkles className="size-5 text-accent" /></div>
+    {show("nextMoves") && <section className="glass-panel rounded-[22px] p-4">
+      <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-accent">Right now</p><h2 className="mt-1 font-display text-[18px] font-extrabold text-ink">Do these next</h2></div><Sparkles className="size-5 text-accent" /></div>
       <div className="mt-3 flex flex-col gap-2">{agenda.slice(0, 4).map((item) => <Link key={item.id} href={item.href} className="press flex items-center gap-3 rounded-[16px] bg-surface-2 p-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent"><ChevronRight className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] font-bold uppercase tracking-wide text-ink-faint">{item.eyebrow}</span><span className="block truncate text-[13px] font-extrabold text-ink">{item.title}</span><span className="block truncate text-[11px] text-ink-soft">{item.detail}</span></span><span className="text-[10px] font-bold text-accent-ink">{item.action}</span></Link>)}</div>
-    </section>
+    </section>}
 
-    <section id="budgets" className="glass-panel rounded-[22px] p-4">
+    {show("wallets") && <section id="budgets" className="glass-panel rounded-[22px] p-4">
       <div className="flex items-center justify-between"><div className="flex items-center gap-2"><WalletCards className="size-[18px] text-accent" /><h2 className="font-display text-[16px] font-extrabold text-ink">Food wallets</h2></div><button onClick={() => setExpenseOpen(!expenseOpen)} className="press flex items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-[11px] font-bold text-accent-contrast"><Plus className="size-3" /> Expense</button></div>
       <div className="mt-3 grid grid-cols-2 gap-2.5">
         <Wallet label="Dining Plan" value={budget.campusRemaining == null ? "Not tracked" : `$${budget.campusRemaining.toFixed(0)} left`} detail={setup.dining_wallet.selection ? `$${budget.campusSpentToday.toFixed(2)} of $${budget.campusDailyGuide.toFixed(0)} guide today` : "No UW plan selected"} progress={budget.campusDailyGuide ? budget.campusSpentToday / budget.campusDailyGuide : 0} />
@@ -89,14 +92,14 @@ export function EverydayOverview({ today }: { today: string }) {
       </div>
       <div className="mt-3 rounded-[14px] bg-accent-soft px-3 py-2.5"><p className="text-[11px] font-bold text-accent-ink">Safe to spend today · ${budget.combinedTodayGuide.toFixed(2)}</p><p className="text-[10px] text-ink-soft">${budget.campusDailyGuide.toFixed(0)} campus guide + ${budget.personalDailyAllowance.toFixed(2)} personal allowance</p></div>
       {expenseOpen && <div className="mt-3 flex gap-2"><select value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value as FoodExpenseCategory)} className="min-w-0 flex-1 rounded-[11px] border border-line bg-surface-2 px-2 text-[12px] text-ink"><option value="groceries">Groceries</option><option value="off_campus_meal">Off-campus meal</option><option value="campus_meal">Campus meal</option><option value="other_food">Other food</option></select><input aria-label="Expense amount" type="number" min={0} value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="$0.00" className="w-24 rounded-[11px] border border-line bg-surface-2 px-2 text-[12px] text-ink outline-none" /><button disabled={saving} onClick={() => void addExpense()} className="rounded-[11px] bg-accent px-3 text-[11px] font-bold text-accent-contrast">Save</button></div>}
-    </section>
+    </section>}
 
-    {!setup.checklist_hidden ? <section id="calendar-import" className="glass-panel rounded-[22px] p-4">
+    {show("checklist") && (!setup.checklist_hidden ? <section id="calendar-import" className="glass-panel rounded-[22px] p-4">
       <div className="flex items-center justify-between"><div className="flex items-center gap-2"><CalendarPlus className="size-[18px] text-accent" /><h2 className="font-display text-[16px] font-extrabold text-ink">Setup checklist</h2></div><div className="flex items-center gap-2"><span className="text-[11px] font-bold text-ink-faint">{checklist.filter((item) => item.done).length}/{checklist.length}</span><button aria-label="Hide setup checklist" title="Hide checklist" onClick={() => void setChecklistHidden(true)} className="grid size-8 place-items-center rounded-full bg-surface-2 text-ink-faint hover:text-ink"><EyeOff className="size-3.5" /></button></div></div>
       <div className="mt-3 grid grid-cols-2 gap-2">{checklist.map((item) => item.label === "Class schedule" ? <button key={item.label} onClick={() => fileRef.current?.click()} className="flex items-center gap-2 rounded-[13px] bg-surface-2 p-2.5 text-left"><Status done={item.done} /><span className="text-[11px] font-bold text-ink">{item.label}</span></button> : <Link key={item.label} href={item.href} className="flex items-center gap-2 rounded-[13px] bg-surface-2 p-2.5"><Status done={item.done} /><span className="text-[11px] font-bold text-ink">{item.label}</span></Link>)}</div>
       <input ref={fileRef} type="file" accept=".ics,text/calendar" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCalendar(file); }} />
       <p className="mt-2 flex items-center gap-1.5 text-[10px] text-ink-faint"><CalendarPlus className="size-3" /> Class import accepts an .ics calendar and merges it with manual entries.</p>
-    </section> : <button onClick={() => void setChecklistHidden(false)} className="press mx-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold text-ink-faint hover:bg-surface-2 hover:text-ink"><Eye className="size-3" /> Show setup checklist</button>}
+    </section> : <button onClick={() => void setChecklistHidden(false)} className="press mx-auto flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[10px] font-semibold text-ink-faint hover:bg-surface-2 hover:text-ink"><Eye className="size-3" /> Show setup checklist</button>)}
   </div>;
 }
 

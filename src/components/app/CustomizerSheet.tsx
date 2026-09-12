@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, BellRing, Check, Contrast, Gauge, Hand, Image as ImageIcon, LayoutGrid, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
+import { Activity, BellRing, Check, ChevronDown, ChevronUp, Contrast, Eye, EyeOff, Gauge, Hand, Image as ImageIcon, LayoutGrid, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
+import { useConfig } from "@/lib/config/ConfigContext";
 import { useTheme } from "@/lib/theme/ThemeContext";
 import { Portal } from "@/components/ui/Portal";
 import {
@@ -27,9 +28,19 @@ import {
   type PageAnim,
   type PanelStyle,
   type QuickAction,
+  type StartPage,
+  type Customize,
+  type MapStyle,
   type WorkoutCardMode,
 } from "@/lib/customize/types";
 import { haptic } from "@/lib/utils/haptics";
+import {
+  HOME_SECTIONS,
+  isHomeSectionVisible,
+  moveHomeSection,
+  orderedHomeSections,
+  toggleHomeSection,
+} from "@/lib/customize/homeSections";
 
 export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { customize, setCustomize, reset } = useCustomize();
@@ -77,10 +88,10 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
 
           <section className="customizer-hero relative overflow-hidden rounded-[22px] border border-accent/20 p-4">
             <div className="relative z-10 flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-[14px] bg-accent text-accent-contrast shadow-[var(--shadow-fab)]"><Sparkles className="size-5" /></span>
+              <span className="ui-tile grid size-10 shrink-0 place-items-center bg-accent text-accent-contrast shadow-[var(--shadow-fab)]"><Sparkles className="size-5" /></span>
               <div>
-                <p className="font-display text-[15px] font-extrabold text-ink">Make Fuel move like you do</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">Tune the whole experience, then let workout mode simplify itself when the gym gets loud.</p>
+                <p className="font-display text-[15px] font-extrabold text-ink">Make it look how you want</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">Change how the app looks and feels. Workout mode strips it down while you lift.</p>
               </div>
             </div>
             <div className="relative z-10 mt-3 grid grid-cols-3 gap-2">
@@ -94,7 +105,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             </div>
           </section>
 
-          {/* Appearance */}
           <Group title="Appearance" hint="Light or dark base.">
             <div className="flex gap-2">
               {([["light", Sun], ["dark", Moon]] as const).map(([mode, Icon]) => (
@@ -111,7 +121,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             </div>
           </Group>
 
-          {/* Accessibility */}
           <Group title="Accessibility & comfort" hint="Readability and eye-strain helpers.">
             <Toggle
               label="High contrast"
@@ -130,7 +139,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             />
           </Group>
 
-          <Group title="Feel & feedback" hint="Control information density, touch feedback, and pacing.">
+          <Group title="Feel & feedback" hint="How tight the layout is, how much it buzzes, how fast it moves.">
             <div className="flex items-center gap-2"><Gauge className="size-4 text-accent" /><Label>Screen density</Label></div>
             <Chips<Density>
               value={customize.density}
@@ -156,11 +165,59 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             <div className="mt-3"><Label>Navigation style</Label><Chips<NavMode> value={customize.navMode} onChange={(navMode) => setCustomize({ navMode })} options={[{ v: "fab", label: "Floating action" }, { v: "tabs", label: "Tab bar" }]} /></div>
             <div className="mt-3 flex items-center gap-2"><Hand className="size-4 text-accent" /><Label>One-handed reach</Label></div>
             <Chips<Handedness> value={customize.handedness} onChange={(handedness) => setCustomize({ handedness })} options={[{ v: "left", label: "Left hand" }, { v: "right", label: "Right hand" }]} />
-            <div className="mt-3"><Label>Primary shortcut</Label><Chips<QuickAction> value={customize.primaryAction} onChange={(primaryAction) => setCustomize({ primaryAction })} options={[{ v: "plan", label: "Plan" }, { v: "workout", label: "Train" }, { v: "log", label: "Log" }, { v: "chat", label: "Chat" }]} /></div>
-            <div className="mt-3"><Label>Reach shortcut</Label><Chips<QuickAction> value={customize.secondaryAction} onChange={(secondaryAction) => setCustomize({ secondaryAction })} options={[{ v: "log", label: "Log" }, { v: "workout", label: "Train" }, { v: "plan", label: "Plan" }, { v: "chat", label: "Chat" }]} /></div>
+            <NavBarPagesEditor customize={customize} setCustomize={setCustomize} />
+            <Toggle
+              className="mt-3"
+              label="Floating shortcut button"
+              hint="The small round button above the bar. Turn it off for a cleaner screen."
+              icon={<Hand className="size-4 text-accent" />}
+              on={customize.showReachShortcut}
+              onToggle={() => setCustomize({ showReachShortcut: !customize.showReachShortcut })}
+            />
           </Group>
 
-          <Group title="Workout cockpit" hint="Context-aware controls for sets, rest, and harsh gym lighting.">
+          <Group title="Start page" hint="Which page the app opens to. Make My Day your home base to land on your campus route.">
+            <Chips<StartPage>
+              value={customize.startPage}
+              onChange={(startPage) => setCustomize({ startPage })}
+              options={[
+                { v: "dashboard", label: "Home" },
+                { v: "today", label: "My Day" },
+                { v: "menu", label: "Dining" },
+                { v: "plan", label: "Plan" },
+                { v: "log", label: "Log" },
+                { v: "workout", label: "Train" },
+                { v: "chat", label: "Chat" },
+              ]}
+            />
+            <Toggle
+              className="mt-3"
+              label="Open My Day in map view"
+              hint="Land straight on the full-screen campus map with your day on top."
+              icon={<Navigation className="size-4 text-accent" />}
+              on={customize.todayFullMap}
+              onToggle={() => setCustomize({ todayFullMap: !customize.todayFullMap })}
+            />
+          </Group>
+
+          <Group title="Maps" hint="Used by My Day, the dining map and every route preview.">
+            <Chips<MapStyle>
+              value={customize.mapStyle}
+              onChange={(mapStyle) => setCustomize({ mapStyle })}
+              options={[
+                { v: "standard", label: "Standard" },
+                { v: "light", label: "Muted" },
+                { v: "dark", label: "Dark" },
+              ]}
+            />
+            <p className="mt-1.5 text-[11px] text-ink-soft">Muted and Dark make pins and routes easier to pick out. Reopen a map to see the change.</p>
+          </Group>
+
+          <Group title="Home layout" hint="Hide anything you don't use, and put the shortcuts you do use first.">
+            <HomeLayoutEditor customize={customize} setCustomize={setCustomize} />
+          </Group>
+
+          <Group title="Workout cockpit" hint="Set tracking, rest timers, and screen settings for the gym.">
             <div className="flex items-center gap-2"><LayoutGrid className="size-4 text-accent" /><Label>Active workout cards</Label></div>
             <Chips<WorkoutCardMode> value={customize.workoutCardMode} onChange={(workoutCardMode) => setCustomize({ workoutCardMode })} options={[{ v: "notebook", label: "Data-dense notebook" }, { v: "focus", label: "Minimal focus" }]} />
             <Toggle className="mt-3" label="Automatic focus mode" hint="When an exercise opens, hide everything except set tracking." icon={<Activity className="size-4 text-accent" />} on={customize.autoFocusMode} onToggle={() => setCustomize({ autoFocusMode: !customize.autoFocusMode })} />
@@ -168,7 +225,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             <Toggle className="mt-3" label="Rest-finished buzz" hint="Alert when a set break ends, using your chosen haptic strength." icon={<BellRing className="size-4 text-accent" />} on={customize.restAlerts} onToggle={() => setCustomize({ restAlerts: !customize.restAlerts })} />
           </Group>
 
-          {/* Accent */}
           <Group title="Accent color" hint="Drives buttons, highlights, gradients and glow.">
             <div className="grid grid-cols-6 gap-2.5">
               {ACCENT_PRESETS.map((p) => {
@@ -188,7 +244,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
               })}
             </div>
             <div className="mt-3 flex items-center gap-2">
-              <span className="size-9 shrink-0 rounded-[10px] border border-line" style={{ background: customize.accent }} />
+              <span className="ui-tile size-9 shrink-0 border border-line" style={{ background: customize.accent }} />
               <input
                 type="text"
                 value={hexInput}
@@ -205,12 +261,11 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
                 value={isValidHex(customize.accent) ? normalizeHex(customize.accent) : "#6c5cf2"}
                 onChange={(e) => setCustomize({ accent: e.target.value })}
                 aria-label="Pick accent color"
-                className="size-9 shrink-0 cursor-pointer rounded-[10px] border border-line bg-transparent p-0.5"
+                className="ui-tile size-9 shrink-0 cursor-pointer border border-line bg-transparent p-0.5"
               />
             </div>
           </Group>
 
-          {/* Background */}
           <Group title="Background" hint="Set the mood behind everything.">
             <Chips<BgStyle>
               value={customize.bgStyle}
@@ -312,7 +367,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             )}
           </Group>
 
-          {/* Background shapes */}
           <Group title="Background shapes" hint="Show your interests — UW spirit, hobbies, or calm.">
             <div className="grid grid-cols-4 gap-2">
               {SHAPE_MOTIFS.map((m) => {
@@ -333,7 +387,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             </div>
           </Group>
 
-          {/* Glass */}
           <Group title="Glass blur" hint={`Frosted panel intensity · ${customize.blur}px`}>
             <input
               type="range"
@@ -346,7 +399,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             />
           </Group>
 
-          {/* Surfaces & shape */}
           <Group title="Surfaces" hint="Corner shape and how panels are filled — applies app-wide.">
             <Label>Corner roundness</Label>
             <Chips<CornerStyle>
@@ -395,7 +447,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             />
           </Group>
 
-          {/* Navigation */}
           <Group title="Navigation bar" hint="Size and shape of the bottom tab bar.">
             <Label>Tab size</Label>
             <Chips<NavSize>
@@ -428,7 +479,6 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
             />
           </Group>
 
-          {/* Typography */}
           <Group title="Typography" hint="Font family across the app.">
             <Chips<FontChoice>
               value={customize.font}
@@ -453,6 +503,146 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
       </div>
     </div>
     </Portal>
+  );
+}
+
+function NavBarPagesEditor({
+  customize,
+  setCustomize,
+}: {
+  customize: Customize;
+  setCustomize: (patch: Partial<Customize>) => void;
+}) {
+  const { showWorkoutTabs } = useConfig();
+  const pages: { v: QuickAction; label: string }[] = [
+    { v: "dashboard", label: "Home" },
+    { v: "menu", label: "Dining" },
+    { v: "plan", label: "Plan" },
+    { v: "today", label: "My Day" },
+    { v: "chat", label: "Chat" },
+    { v: "progress", label: "Progress" },
+    ...(showWorkoutTabs
+      ? [{ v: "workout" as QuickAction, label: "Train" }, { v: "log" as QuickAction, label: "Log" }]
+      : []),
+  ];
+  const hidden = customize.navHidden ?? [];
+
+  return (
+    <>
+      <div className="mt-3">
+        <Label>Center button</Label>
+        <Chips<QuickAction> value={customize.primaryAction} onChange={(primaryAction) => setCustomize({ primaryAction })} options={pages} />
+        <p className="mt-1.5 text-[11px] text-ink-soft">
+          The page you pick moves to the center and leaves the tabs, so it never shows up twice.
+        </p>
+      </div>
+
+      <div className="mt-3">
+        <Label>Pages in the bar</Label>
+        <div className="flex flex-wrap gap-2">
+          {pages.map((p) => {
+            const isCenter = p.v === customize.primaryAction;
+            const on = isCenter || !hidden.includes(p.v);
+            return (
+              <button
+                key={p.v}
+                disabled={isCenter}
+                aria-pressed={on}
+                onClick={() => {
+                  setCustomize({ navHidden: on ? [...hidden, p.v] : hidden.filter((x) => x !== p.v) });
+                  haptic("light");
+                }}
+                className={`press flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-bold transition disabled:cursor-default ${
+                  on ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-faint"
+                }`}
+              >
+                {on && <Check className="size-3" />}
+                {p.label}
+                {isCenter ? " · center" : ""}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <Label>Reach shortcut</Label>
+        <Chips<QuickAction> value={customize.secondaryAction} onChange={(secondaryAction) => setCustomize({ secondaryAction })} options={pages} />
+      </div>
+    </>
+  );
+}
+
+function HomeLayoutEditor({
+  customize,
+  setCustomize,
+}: {
+  customize: Customize;
+  setCustomize: (patch: Partial<Customize>) => void;
+}) {
+  const order = orderedHomeSections(customize);
+  const rows = [
+    ...HOME_SECTIONS.filter((s) => s.fixed),
+    ...order.map((id) => HOME_SECTIONS.find((s) => s.id === id)!).filter(Boolean),
+  ];
+  const hiddenCount = (customize.homeHidden ?? []).length;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.map((section) => {
+        const visible = isHomeSectionVisible(customize, section.id);
+        const pos = order.indexOf(section.id);
+        return (
+          <div
+            key={section.id}
+            className={`flex items-center gap-2 rounded-[12px] border border-line bg-surface-2 px-3 py-2 ${visible ? "" : "opacity-55"}`}
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[12.5px] font-bold text-ink">{section.label}</p>
+              <p className="truncate text-[10px] text-ink-soft">{section.hint}</p>
+            </div>
+
+            {!section.fixed && visible && (
+              <div className="flex shrink-0 items-center">
+                <button
+                  aria-label={`Move ${section.label} up`}
+                  disabled={pos <= 0}
+                  onClick={() => { setCustomize({ homeOrder: moveHomeSection(customize, section.id, -1) }); haptic("light"); }}
+                  className="grid size-6 place-items-center rounded-md text-ink-faint disabled:opacity-25"
+                >
+                  <ChevronUp className="size-3.5" />
+                </button>
+                <button
+                  aria-label={`Move ${section.label} down`}
+                  disabled={pos === -1 || pos >= order.length - 1}
+                  onClick={() => { setCustomize({ homeOrder: moveHomeSection(customize, section.id, 1) }); haptic("light"); }}
+                  className="grid size-6 place-items-center rounded-md text-ink-faint disabled:opacity-25"
+                >
+                  <ChevronDown className="size-3.5" />
+                </button>
+              </div>
+            )}
+
+            <button
+              aria-label={visible ? `Hide ${section.label}` : `Show ${section.label}`}
+              onClick={() => { setCustomize({ homeHidden: toggleHomeSection(customize, section.id) }); haptic("light"); }}
+              className={`grid size-7 shrink-0 place-items-center rounded-full ${visible ? "bg-accent text-accent-contrast" : "bg-surface-3 text-ink-faint"}`}
+            >
+              {visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            </button>
+          </div>
+        );
+      })}
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => { setCustomize({ homeHidden: [] }); haptic("light"); }}
+          className="press mt-1 self-start rounded-full bg-surface-2 px-3 py-1.5 text-[11px] font-bold text-ink-soft"
+        >
+          Show all {hiddenCount} hidden
+        </button>
+      )}
+    </div>
   );
 }
 

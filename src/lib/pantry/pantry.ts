@@ -1,5 +1,3 @@
-// Client types + API wrappers for the dorm pantry.
-
 export const APPLIANCES = [
   "Microwave", "Mini fridge", "Air fryer", "Toaster oven", "Kettle",
   "Hot plate", "Rice cooker", "Blender", "Full stove", "Full oven",
@@ -19,7 +17,6 @@ export interface RecipeIngredient {
   measure: string;
 }
 
-/** A real recipe sourced from TheMealDB — instructions come from a cited source, not AI. */
 export interface Recipe {
   id: string;
   title: string;
@@ -41,7 +38,6 @@ export interface Recipe {
 
 export interface AiKeys {
   cohereKey?: string | null;
-  groqKey?: string | null;
 }
 
 export interface IngredientResult {
@@ -64,10 +60,9 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
 }
 
 export function scanPantryPhoto(imageB64: string, keys: AiKeys, signal?: AbortSignal): Promise<{ items: ScannedPantryItem[] }> {
-  return postJson("/api/pantry/scan", { imageB64, cohereKey: keys.cohereKey ?? undefined, groqKey: keys.groqKey ?? undefined }, signal);
+  return postJson("/api/pantry/scan", { imageB64, cohereKey: keys.cohereKey ?? undefined }, signal);
 }
 
-/** Search foods/ingredients (with photos) from Open Food Facts — no AI key required. */
 export async function searchIngredients(q: string, signal?: AbortSignal): Promise<IngredientResult[]> {
   const res = await fetch(`/api/pantry/ingredient-search?q=${encodeURIComponent(q)}`, { signal });
   if (!res.ok) return [];
@@ -75,7 +70,6 @@ export async function searchIngredients(q: string, signal?: AbortSignal): Promis
   return data.results ?? [];
 }
 
-/** Recipes come from a real recipe database — no AI key required. */
 export function findRecipes(
   input: { ingredients: string[]; appliances: string[]; access: string; diet?: string },
   signal?: AbortSignal,
@@ -83,11 +77,6 @@ export function findRecipes(
   return postJson("/api/pantry/recipes", input, signal);
 }
 
-/**
- * TheMealDB does not carry nutrition, so we estimate per-serving macros from the recipe's
- * category. These are rough starting numbers the user can correct after logging — the app
- * never presents them as exact.
- */
 export function estimateRecipeNutrition(r: Recipe): { calories: number; protein: number; carbs: number; fat: number } {
   const cat = (r.category || "").toLowerCase();
   let calories = 430;

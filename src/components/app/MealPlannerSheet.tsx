@@ -129,7 +129,13 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
     setError(null);
 
     try {
-      const raw = await callCohere(cohereKey, buildPrompt(), { temperature: 0.6, signal: ctrl.signal });
+      const raw = await callCohere(cohereKey, buildPrompt(), {
+        temperature: 0.5,
+        signal: ctrl.signal,
+        timeoutMs: 25_000,
+        maxTokens: 900,
+        jsonMode: true,
+      });
 
       let parsed: {
         title: string;

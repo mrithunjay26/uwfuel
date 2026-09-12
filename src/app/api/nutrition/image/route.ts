@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  let body: { imageB64?: unknown; cohereKey?: unknown; groqKey?: unknown; note?: unknown };
+  let body: { imageB64?: unknown; cohereKey?: unknown; note?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -15,11 +15,10 @@ export async function POST(req: Request) {
   }
   const image = body.imageB64;
   const cohereKey = typeof body.cohereKey === "string" && body.cohereKey ? body.cohereKey : undefined;
-  const groqKey = typeof body.groqKey === "string" && body.groqKey ? body.groqKey : undefined;
   const note = typeof body.note === "string" ? body.note.trim().slice(0, 200) : undefined;
-  if (!cohereKey && !groqKey && !fallbackConfigured()) {
+  if (!cohereKey && !fallbackConfigured()) {
     return NextResponse.json(
-      { error: "Add a Cohere or Groq key in Settings to scan meals." },
+      { error: "Add your Cohere key in Settings to scan meals." },
       { status: 503 },
     );
   }
@@ -30,7 +29,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Image too large — try again." }, { status: 413 });
   }
   try {
-    const result = await visionAnalyze({ imageB64: image, cohereKey, groqKey, note });
+    const result = await visionAnalyze({ imageB64: image, cohereKey, note });
     const items: ScannedFood[] = (await groundFoods(result.items)).map((f) => ({
       ...f,
       source: "vision" as const,

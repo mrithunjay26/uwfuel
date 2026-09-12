@@ -13,11 +13,6 @@ function tokens(s: string): string[] {
     .filter((t) => t.length > 2 && !STOP.has(t));
 }
 
-/**
- * Fuzzy-match a recognized food name against today's flattened UW menu so we
- * can swap in exact campus calories/price + a Dub Grub order link.
- * Returns the best item when token overlap is confident, else null.
- */
 export function matchCampusItem(name: string, menu: FlatMenuItem[]): FlatMenuItem | null {
   const q = tokens(name);
   if (q.length === 0 || menu.length === 0) return null;
@@ -31,7 +26,7 @@ export function matchCampusItem(name: string, menu: FlatMenuItem[]): FlatMenuIte
     const overlap = q.filter((w) => t.includes(w)).length;
     if (overlap === 0) continue;
     let score = overlap / Math.max(q.length, t.length);
-    if (item.available_now) score += 0.05; // gentle preference for what's served now
+    if (item.available_now) score += 0.05;
     if (score > bestScore) {
       bestScore = score;
       best = item;

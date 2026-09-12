@@ -1,4 +1,19 @@
-const CACHE = "uwfuel-v3";
+const CACHE = "uwfuel-v4";
+const TILE_CACHE = "uwfuel-tiles-v1";
+const TILE_LIMIT = 600;
+
+const TILE_HOSTS = [
+  "tile.openstreetmap.org",
+  "a.tile.openstreetmap.org",
+  "b.tile.openstreetmap.org",
+  "c.tile.openstreetmap.org",
+  "basemaps.cartocdn.com",
+  "a.basemaps.cartocdn.com",
+  "b.basemaps.cartocdn.com",
+  "c.basemaps.cartocdn.com",
+  "d.basemaps.cartocdn.com",
+];
+const ASSET_HOSTS = ["unpkg.com"];
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -8,21 +23,57 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+      await Promise.all(
+        keys.filter((k) => k !== CACHE && k !== TILE_CACHE).map((k) => caches.delete(k)),
+      );
       await self.clients.claim();
     })(),
   );
 });
+
+async function trimTileCache() {
+  const cache = await caches.open(TILE_CACHE);
+  const keys = await cache.keys();
+  if (keys.length <= TILE_LIMIT) return;
+  const excess = keys.length - TILE_LIMIT;
+  await Promise.all(keys.slice(0, excess).map((k) => cache.delete(k)));
+}
+
+async function cacheFirst(req, cacheName) {
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const fresh = await fetch(req);
+  if (fresh && (fresh.status === 200 || fresh.type === "opaque")) {
+    cache.put(req, fresh.clone());
+    if (cacheName === TILE_CACHE) trimTileCache();
+  }
+  return fresh;
+}
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
 
-  // Never cache the version manifest — it's how the app detects updates.
+  if (url.origin !== self.location.origin) {
+    if (TILE_HOSTS.includes(url.hostname)) {
+      event.respondWith(cacheFirst(req, TILE_CACHE).catch(() => caches.match(req).then((r) => r || Response.error())));
+      return;
+    }
+    if (ASSET_HOSTS.includes(url.hostname)) {
+      event.respondWith(cacheFirst(req, CACHE).catch(() => caches.match(req).then((r) => r || Response.error())));
+    }
+    return;
+  }
+
   if (url.pathname === "/version.json") return;
+
+  if (url.pathname.startsWith("/_next/static/")) {
+    event.respondWith(cacheFirst(req, CACHE).catch(() => caches.match(req).then((r) => r || Response.error())));
+    return;
+  }
 
   event.respondWith(
     (async () => {

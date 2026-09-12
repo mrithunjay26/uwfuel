@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Boxes, Camera, MapPin, Search, UtensilsCrossed, X } from "lucide-react";
+import { Boxes, Camera, MapPin, Maximize2, Minimize2, Search, UtensilsCrossed, X } from "lucide-react";
+import { Portal } from "@/components/ui/Portal";
+import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { MealCard } from "@/components/app/MealCard";
 import { MealScannerSheet } from "@/components/app/MealScannerSheet";
 import { PantryTab } from "@/components/app/PantryTab";
@@ -289,9 +291,7 @@ export default function MenuPage() {
               key={t}
               onClick={() => setPageTab(t)}
               className={`flex flex-1 items-center justify-center gap-1.5 rounded-[12px] py-2 text-[13px] font-bold transition ${
-                pageTab === t
-                  ? "glass-strong text-ink shadow-[var(--shadow-sm)]"
-                  : "text-ink-soft"
+                pageTab === t ? "seg-active" : "text-ink-soft"
               }`}
             >
               <Icon className="size-3.5" /> {label}
@@ -524,6 +524,10 @@ function MapTabContent({
   onLocationSelect:   (locId: string) => void;
   userLocation?:      GeoPosition | null;
 }) {
+  const { customize } = useCustomize();
+  const [fullMap, setFullMap] = useState(false);
+  const navTop = customize.navPosition === "top";
+
   const groups = useMemo(
     () => buildLocationGroups(locations ?? {}),
     [locations],
@@ -553,21 +557,70 @@ function MapTabContent({
   return (
     <div className="flex-1 pb-6">
 
-      <div className="relative w-full overflow-hidden" style={{ height: "320px" }}>
-        {loading ? (
-          <div className="h-full w-full skeleton" />
-        ) : (
-          <DiningMap
-            groups={groups}
-            itemsByGroup={itemsByGroup}
-            coordsByGroup={coordsByGroup}
-            locationIdByGroup={locationIdByGroup}
-            onLocationSelect={onLocationSelect}
-            userLocation={userLocation}
-            className="h-full w-full"
-          />
-        )}
+      <div className="px-5">
+        <div className="glass-panel relative overflow-hidden rounded-[22px]">
+          {loading || fullMap ? (
+            <div className={`h-[300px] w-full ${loading ? "skeleton" : ""}`} />
+          ) : (
+            <DiningMap
+              groups={groups}
+              itemsByGroup={itemsByGroup}
+              coordsByGroup={coordsByGroup}
+              locationIdByGroup={locationIdByGroup}
+              onLocationSelect={onLocationSelect}
+              userLocation={userLocation}
+              className="h-[300px] w-full"
+            />
+          )}
+          {!loading && (
+            <button
+              onClick={() => setFullMap(true)}
+              aria-label="Make the map full screen"
+              className="on-map press absolute right-3 top-3 z-[1000] grid size-9 place-items-center rounded-full"
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-center text-[11px] text-ink-soft">
+          Tap a spot for today&apos;s menu and walking directions.
+        </p>
       </div>
+
+      {fullMap && (
+        <Portal>
+          <div
+            className="fixed inset-x-0 z-[35] mx-auto flex max-w-[480px] flex-col bg-bg"
+            style={navTop
+              ? { top: "calc(74px + env(safe-area-inset-top))", bottom: 0 }
+              : { top: 0, bottom: "calc(80px + env(safe-area-inset-bottom))" }}
+          >
+            <div className={`on-map z-10 flex shrink-0 items-center justify-between gap-2 px-4 pb-2 ${navTop ? "pt-2" : "pt-[max(env(safe-area-inset-top),10px)]"}`}>
+              <p className="font-display text-[15px] font-extrabold text-ink">Where to eat</p>
+              <button
+                onClick={() => setFullMap(false)}
+                aria-label="Close the full screen map"
+                className="press grid size-9 place-items-center rounded-full bg-surface-2 text-ink"
+              >
+                <Minimize2 className="size-4" />
+              </button>
+            </div>
+            <div className="relative min-h-0 flex-1">
+              <DiningMap
+                groups={groups}
+                itemsByGroup={itemsByGroup}
+                coordsByGroup={coordsByGroup}
+                locationIdByGroup={locationIdByGroup}
+                onLocationSelect={(id) => { setFullMap(false); onLocationSelect?.(id); }}
+                userLocation={userLocation}
+                scrollZoom
+                zoomControl={false}
+                className="absolute inset-0"
+              />
+            </div>
+          </div>
+        </Portal>
+      )}
 
       <div className="px-5 pt-4">
         <h2 className="font-display text-[17px] font-extrabold text-ink">Dining Locations</h2>

@@ -3,10 +3,6 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Ingredient / food search backed by Open Food Facts — a free, open database that covers
-// both generic foods ("tomato", "brown rice") and branded products ("Rice Krispies"), each
-// with a real product photo. No API key required.
-
 const OFF = "https://world.openfoodfacts.org/cgi/search.pl";
 
 interface OffProduct {
@@ -61,7 +57,7 @@ export async function GET(req: Request) {
     for (const p of data.products ?? []) {
       const name = (p.product_name || p.generic_name || "").trim();
       const image = p.image_front_small_url || p.image_small_url || "";
-      if (!name || !image) continue; // cards need a real photo
+      if (!name || !image) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

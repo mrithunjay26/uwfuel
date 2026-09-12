@@ -27,12 +27,14 @@ type Phase = "capture" | "loading" | "results";
 interface EditableFood {
   id: string;
   name: string;
-  calories: number; protein: number; carbs: number; fat: number; // per single serving
+  calories: number; protein: number; carbs: number; fat: number;
   servings: number;
-  qty: string; // free-text quantity, used when adding to the pantry
+  qty: string;
   servingDescription?: string;
   confidence?: number;
   grounded?: boolean;
+  grams: number;
+  per100: { calories: number; protein: number; carbs: number; fat: number } | null;
   match: FlatMenuItem | null;
   locationName: string;
   locationId: string;
@@ -48,9 +50,6 @@ interface BarcodeDetectorLike {
 let _uid = 0;
 const nextId = () => `f${++_uid}`;
 
-// Always trust the AI's (context-aware) values for ANY food. A campus menu
-// match is attached only as an optional suggestion the user can apply — it
-// never overrides what was scanned.
 function toEditable(food: ScannedFood, menu: FlatMenuItem[]): EditableFood {
   return {
     id: nextId(),
@@ -64,6 +63,16 @@ function toEditable(food: ScannedFood, menu: FlatMenuItem[]): EditableFood {
     servingDescription: food.servingDescription,
     confidence: food.confidence,
     grounded: food.grounded,
+    grams: food.grams && food.grams > 0 ? Math.round(food.grams) : 0,
+    per100:
+      food.grams && food.grams > 0
+        ? {
+            calories: (food.calories / food.grams) * 100,
+            protein: (food.protein / food.grams) * 100,
+            carbs: (food.carbs / food.grams) * 100,
+            fat: (food.fat / food.grams) * 100,
+          }
+        : null,
     match: matchCampusItem(food.name, menu),
     locationName: food.brand || "Scan",
     locationId: "scan",
@@ -80,6 +89,8 @@ function blankFood(): EditableFood {
     calories: 0, protein: 0, carbs: 0, fat: 0,
     servings: 1,
     qty: "",
+    grams: 0,
+    per100: null,
     match: null,
     locationName: "Manual",
     locationId: "manual",
@@ -96,13 +107,12 @@ export function MealScannerSheet({
   onClose: () => void;
   onLogged?: (msg: string) => void;
   dateKey?: string;
-  /** "log" (default) logs scanned foods to the journal; "pantry" adds them to the dorm pantry. */
   target?: "log" | "pantry";
   onAddedToPantry?: (msg: string) => void;
 }) {
   const pantryMode = target === "pantry";
   const handle = useUserDb();
-  const { cohereKey, groqKey } = useConfig();
+  const { cohereKey } = useConfig();
   const day = dateKey ?? todayPacificKey();
   const { items: menu } = useFlatMenu(open);
   const { profile: setupProfile } = useOnboardingProfile();
@@ -129,15 +139,12 @@ export function MealScannerSheet({
       )
     : null;
 
-  // Run the camera only while actively capturing in a camera mode.
   useEffect(() => {
     if (open && phase === "capture" && (mode === "photo" || mode === "barcode")) start();
     else stop();
     return () => { if (!open) stop(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, phase]);
 
-  // Reset everything when the sheet closes.
   useEffect(() => {
     if (open) return;
     abortRef.current?.abort();
@@ -190,19 +197,19 @@ export function MealScannerSheet({
     haptic("light");
     setLastScan({ kind: "image", data: frame });
     const ctx = note.trim() || undefined;
-    void runAnalyze((signal) => scanImage(frame, { cohereKey, groqKey, note: ctx }, signal));
-  }, [captureFrame, runAnalyze, cohereKey, groqKey, note]);
+    void runAnalyze((signal) => scanImage(frame, { cohereKey, note: ctx }, signal));
+  }, [captureFrame, runAnalyze, cohereKey, note]);
 
   const onAnalyzeText = useCallback(() => {
     if (text.trim().length < 2) return;
     setLastScan({ kind: "text", data: text.trim() });
-    void runAnalyze((signal) => scanText(text.trim(), { cohereKey, groqKey }, signal));
-  }, [text, runAnalyze, cohereKey, groqKey]);
+    void runAnalyze((signal) => scanText(text.trim(), { cohereKey }, signal));
+  }, [text, runAnalyze, cohereKey]);
 
   const onBarcode = useCallback(
     (code: string) => {
       haptic("medium");
-      setLastScan(null); // barcode results are exact — not refineable by context
+      setLastScan(null);
       void runAnalyze(async (signal) => {
         const { item } = await scanBarcode(code, signal);
         return { items: item ? [item] : [], ingredients: [] };
@@ -211,23 +218,21 @@ export function MealScannerSheet({
     [runAnalyze],
   );
 
-  // Re-run the same photo/description with the (possibly updated) context note.
   const onRefine = useCallback(() => {
     if (!lastScan) return;
     haptic("light");
     const ctx = note.trim();
     if (lastScan.kind === "image") {
-      void runAnalyze((signal) => scanImage(lastScan.data, { cohereKey, groqKey, note: ctx || undefined }, signal));
+      void runAnalyze((signal) => scanImage(lastScan.data, { cohereKey, note: ctx || undefined }, signal));
     } else {
       const combined = ctx ? `${lastScan.data} — ${ctx}` : lastScan.data;
-      void runAnalyze((signal) => scanText(combined, { cohereKey, groqKey }, signal));
+      void runAnalyze((signal) => scanText(combined, { cohereKey }, signal));
     }
-  }, [lastScan, note, runAnalyze, cohereKey, groqKey]);
+  }, [lastScan, note, runAnalyze, cohereKey]);
 
   const appendContext = (chip: string) =>
     setNote((prev) => (prev.toLowerCase().includes(chip.toLowerCase()) ? prev : prev.trim() ? `${prev.trim()}, ${chip}` : chip));
 
-  // International food-database search (USDA FDC + Open Food Facts).
   const onSearch = useCallback(() => {
     const q = searchQ.trim();
     if (q.length < 2) return;
@@ -249,7 +254,6 @@ export function MealScannerSheet({
     haptic("medium");
   };
 
-  // Save a result food to the reusable inventory ("My foods").
   const saveToInventory = (f: EditableFood) => {
     if (!handle) return;
     haptic("light");
@@ -263,8 +267,6 @@ export function MealScannerSheet({
     }).then(() => setSavedIds((m) => ({ ...m, [f.id]: true }))).catch(() => {});
   };
 
-  // Barcode detection while in barcode mode: native BarcodeDetector when
-  // available (Android/ChromeOS), else a lazily-loaded ZXing fallback (desktop).
   useEffect(() => {
     if (!open || mode !== "barcode" || phase !== "capture" || status !== "active") return;
     let active = true;
@@ -289,10 +291,9 @@ export function MealScannerSheet({
         try {
           const codes = await detector.detect(videoRef.current);
           if (codes[0]?.rawValue) hit(codes[0].rawValue);
-        } catch { /* frame not ready */ }
+        } catch { }
       }, 600);
     } else {
-      // Desktop fallback — decode straight off the live <video> element.
       import("@zxing/browser")
         .then(({ BrowserMultiFormatReader }) => {
           if (!active || !videoRef.current) return;
@@ -317,6 +318,23 @@ export function MealScannerSheet({
 
   const setServings = (id: string, delta: number) =>
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, servings: Math.max(0.5, Math.round((f.servings + delta) * 2) / 2) } : f)));
+  const setGrams = (id: string, grams: number) =>
+    setFoods((prev) =>
+      prev.map((f) => {
+        if (f.id !== id || !f.per100) return f;
+        const g = Math.max(5, Math.min(2000, Math.round(grams)));
+        const k = g / 100;
+        return {
+          ...f,
+          grams: g,
+          calories: Math.round(f.per100.calories * k),
+          protein: Math.round(f.per100.protein * k),
+          carbs: Math.round(f.per100.carbs * k),
+          fat: Math.round(f.per100.fat * k),
+        };
+      }),
+    );
+
   const editMacro = (id: string, key: "calories" | "protein" | "carbs" | "fat", val: number) =>
     setFoods((prev) => prev.map((f) => (f.id === id ? { ...f, [key]: Math.max(0, val) } : f)));
   const setName = (id: string, name: string) =>
@@ -330,7 +348,6 @@ export function MealScannerSheet({
   const removeFood = (id: string) => setFoods((prev) => prev.filter((f) => f.id !== id));
   const addManualFood = () => setFoods((prev) => [...prev, blankFood()]);
 
-  // Merge every detected item (scaled by its servings) into a single combined food.
   const combineAll = () =>
     setFoods((prev) => {
       if (prev.length < 2) return prev;
@@ -343,6 +360,9 @@ export function MealScannerSheet({
         }),
         { calories: 0, protein: 0, carbs: 0, fat: 0 },
       );
+      const totalGrams = prev.every((f) => f.grams > 0)
+        ? prev.reduce((g, f) => g + f.grams * f.servings, 0)
+        : 0;
       const names = prev.map((f) => f.name).filter(Boolean);
       const name = names.length <= 2 ? names.join(" + ") : `${names.slice(0, 2).join(", ")} +${names.length - 2} more`;
       haptic("medium");
@@ -355,6 +375,16 @@ export function MealScannerSheet({
         fat: Math.round(sum.fat),
         servings: 1,
         qty: "",
+        grams: Math.round(totalGrams),
+        per100:
+          totalGrams > 0
+            ? {
+                calories: (sum.calories / totalGrams) * 100,
+                protein: (sum.protein / totalGrams) * 100,
+                carbs: (sum.carbs / totalGrams) * 100,
+                fat: (sum.fat / totalGrams) * 100,
+              }
+            : null,
         servingDescription: `${prev.length} items combined`,
         match: null,
         locationName: "Scan",
@@ -375,7 +405,6 @@ export function MealScannerSheet({
     { calories: 0, protein: 0, carbs: 0, fat: 0 },
   );
 
-  // Opt-in: swap in the matched campus item's exact nutrition, price & location.
   const applyCampus = (id: string) =>
     setFoods((prev) =>
       prev.map((f) => {
@@ -460,7 +489,6 @@ export function MealScannerSheet({
   return (
     <Portal>
     <div className="fixed inset-0 z-[80] flex flex-col bg-black">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),12px)] pb-3">
         <h2 className="flex items-center gap-2 font-display text-[16px] font-extrabold text-white">
           <Sparkles className="size-4 text-accent" /> {pantryMode ? "Scan your pantry" : "Scan a meal"}
@@ -470,7 +498,6 @@ export function MealScannerSheet({
         </button>
       </div>
 
-      {/* Mode switch */}
       <div className="mx-4 mb-3 flex gap-1 rounded-[14px] bg-white/20 p-1">
         {([["photo", "Photo", Camera], ["barcode", "Barcode", Barcode], ["search", "Search", Search], ["text", "Type", Keyboard]] as const).map(
           ([m, label, Icon]) => (
@@ -488,7 +515,6 @@ export function MealScannerSheet({
       </div>
 
       <div className="relative flex-1 overflow-hidden">
-        {/* Camera preview */}
         {cameraMode && phase === "capture" && (
           <div className="absolute inset-0">
             <video ref={videoRef} playsInline muted className="size-full object-cover" />
@@ -519,7 +545,6 @@ export function MealScannerSheet({
           </div>
         )}
 
-        {/* Search mode — international food database (FDC + Open Food Facts) */}
         {mode === "search" && phase === "capture" && (
           <div className="absolute inset-0 flex flex-col bg-bg px-5 py-5">
             <p className="text-[13px] text-ink-soft">Search a worldwide food database — branded &amp; generic foods.</p>
@@ -565,7 +590,6 @@ export function MealScannerSheet({
           </div>
         )}
 
-        {/* Text mode */}
         {mode === "text" && phase === "capture" && (
           <div className="absolute inset-0 flex flex-col gap-3 bg-bg px-5 py-5">
             <p className="text-[13px] text-ink-soft">Describe what you ate and we’ll estimate the nutrition.</p>
@@ -588,7 +612,6 @@ export function MealScannerSheet({
           </div>
         )}
 
-        {/* Loading */}
         {phase === "loading" && (
           <div className="absolute inset-0 grid place-items-center bg-bg">
             <div className="text-center">
@@ -598,14 +621,13 @@ export function MealScannerSheet({
           </div>
         )}
 
-        {/* Results editor */}
         {phase === "results" && (
           <div className="thin-scrollbar absolute inset-0 overflow-y-auto bg-bg px-4 py-4">
             <div className="flex flex-col gap-3">
               {pantryMode && foods.length > 0 && (
                 <div className="rounded-[16px] bg-accent-soft px-4 py-3">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-accent-ink">Found {foods.length} item{foods.length > 1 ? "s" : ""}</p>
-                  <p className="mt-0.5 text-[12px] text-ink-soft">Review names &amp; quantities, then add them to your pantry. You can fine-tune portions anytime.</p>
+                  <p className="mt-0.5 text-[12px] text-ink-soft">Check the names and amounts, then add them to your pantry. You can change portions later.</p>
                 </div>
               )}
               {!pantryMode && foods.length > 0 && (
@@ -634,20 +656,20 @@ export function MealScannerSheet({
               {!pantryMode && dietaryAssessment?.status === "blocked" && (
                 <div role="alert" className="rounded-[16px] border border-danger/30 bg-danger/10 px-4 py-3">
                   <p className="flex items-center gap-2 text-[12px] font-bold text-danger">
-                    <AlertTriangle className="size-4 shrink-0" /> Dietary conflict detected
+                    <AlertTriangle className="size-4 shrink-0" /> This breaks one of your food rules
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
-                    {dietaryAssessment.reasons.join(" · ")}. You can still log this meal so your history stays accurate.
+                    {dietaryAssessment.reasons.join(" · ")}. Log it anyway if you ate it — your history should match what you actually had.
                   </p>
                 </div>
               )}
               {!pantryMode && dietaryAssessment?.status === "unknown" && (
                 <div role="status" className="rounded-[16px] border border-line bg-surface-2 px-4 py-3">
                   <p className="flex items-center gap-2 text-[12px] font-bold text-ink">
-                    <AlertTriangle className="size-4 shrink-0 text-ink-faint" /> Dietary status unverified
+                    <AlertTriangle className="size-4 shrink-0 text-ink-faint" /> We can't tell if this fits your rules
                   </p>
                   <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
-                    Check the ingredients before eating. Logging remains available for accurate tracking.
+                    Check the ingredients before you eat. You can still log it either way.
                   </p>
                 </div>
               )}
@@ -722,7 +744,7 @@ export function MealScannerSheet({
                         <p className="mt-0.5 text-[11px] text-ink-faint">
                           {f.isCustom ? (f.servingDescription || "Estimated") : f.locationName}
                           {!f.isCustom && f.price > 0 ? ` · $${f.price.toFixed(2)}` : ""}
-                          {f.grounded ? " · USDA" : ""}
+                          {f.isCustom ? (f.grounded ? " · matched to food data" : " · estimated") : ""}
                           {f.confidence != null && f.confidence < 0.5 ? " · low confidence — tap to edit" : ""}
                         </p>
                       </div>
@@ -753,7 +775,25 @@ export function MealScannerSheet({
                       </button>
                     )}
 
-                    {/* Servings */}
+                    {f.per100 ? (
+                      <div className="mt-2.5 flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">How much</span>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setGrams(f.id, f.grams - 10)} aria-label="Less" className="press grid size-7 place-items-center rounded-full bg-surface-2 text-ink"><Minus className="size-3.5" /></button>
+                          <span className="flex items-baseline">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={f.grams}
+                              onChange={(e) => setGrams(f.id, Number(e.target.value) || 0)}
+                              className="w-12 bg-transparent text-center text-[15px] font-bold text-ink outline-none"
+                            />
+                            <span className="text-[11px] font-bold text-ink-faint">g</span>
+                          </span>
+                          <button onClick={() => setGrams(f.id, f.grams + 10)} aria-label="More" className="press grid size-7 place-items-center rounded-full bg-surface-2 text-ink"><Plus className="size-3.5" /></button>
+                        </div>
+                      </div>
+                    ) : (
                     <div className="mt-2.5 flex items-center justify-between">
                       <span className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Servings</span>
                       <div className="flex items-center gap-2">
@@ -762,8 +802,8 @@ export function MealScannerSheet({
                         <button onClick={() => setServings(f.id, +0.5)} className="press grid size-7 place-items-center rounded-full bg-surface-2 text-ink"><Plus className="size-3.5" /></button>
                       </div>
                     </div>
+                    )}
 
-                    {/* Editable macros (per serving) */}
                     <div className="mt-2.5 grid grid-cols-4 gap-2">
                       {([["calories", "kcal", "text-flame"], ["protein", "P", "text-protein"], ["carbs", "C", "text-carbs"], ["fat", "F", "text-fat"]] as const).map(
                         ([key, label, color]) => (
@@ -786,7 +826,6 @@ export function MealScannerSheet({
                       </p>
                     )}
 
-                    {/* Price & how it was paid — same fields the journal shows */}
                     <div className="mt-2.5 grid grid-cols-2 gap-2">
                       <label className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">
                         Price
@@ -850,7 +889,6 @@ export function MealScannerSheet({
           </div>
         )}
 
-        {/* Error toast */}
         {error && phase !== "results" && (
           <div className="absolute inset-x-4 bottom-28 rounded-[12px] bg-ink/90 px-4 py-2.5 text-center text-[12px] font-semibold text-surface">
             {error}
@@ -858,7 +896,6 @@ export function MealScannerSheet({
         )}
       </div>
 
-      {/* Bottom action bar */}
       {cameraMode && phase === "capture" && mode === "photo" && (
         <div className="flex flex-col items-center gap-3 px-4 pb-[max(env(safe-area-inset-bottom),20px)] pt-4">
           <div className="flex w-full items-center gap-2 rounded-full bg-white/10 px-3.5 py-2 backdrop-blur-md">

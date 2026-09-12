@@ -44,7 +44,7 @@ export function getUserFirebase(
       const app = initPersonalApp(uid, firebase);
       return {
         app,
-        auth: getSharedAuth(), // auth always via shared project
+        auth: getSharedAuth(),
         db: getDatabase(app, firebase.databaseURL),
         isPersonal: true,
       };

@@ -736,7 +736,7 @@ function FoodLogRow({
         className="press flex min-w-0 flex-1 items-center gap-2 text-left"
         aria-label={`Details for ${entry.name}`}
       >
-        <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-surface-3 text-ink-soft">
+        <span className="ui-tile grid size-8 shrink-0 place-items-center bg-surface-3 text-ink-soft">
           <Utensils className="size-4" />
         </span>
         <span className="min-w-0 flex-1">

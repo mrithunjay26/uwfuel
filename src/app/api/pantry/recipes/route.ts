@@ -3,11 +3,6 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Real recipes from TheMealDB (https://www.themealdb.com) — a free, community-curated
-// recipe database with source attributions + video tutorials. We rank its real recipes by
-// how much of the student's actual pantry they use, and strictly classify what equipment
-// each recipe needs (parsed from its real instructions) against the student's kitchen.
-
 const API = "https://www.themealdb.com/api/json/v1/1";
 
 interface MealDbMeal {
@@ -34,9 +29,9 @@ interface OutRecipe {
   tags: string[];
   ingredients: { name: string; measure: string }[];
   steps: string[];
-  uses: string[];      // ingredients actually in the student's pantry
-  staples: string[];   // common seasonings assumed on hand (salt, oil, …) — NOT claimed to be in inventory
-  missing: string[];   // real ingredients the student must buy
+  uses: string[];
+  staples: string[];
+  missing: string[];
   requiredMethods: string[];
   canMake: boolean;
   matchCount: number;
@@ -52,7 +47,6 @@ async function getJson<T>(url: string): Promise<T | null> {
   }
 }
 
-/** Reduce a messy pantry name ("2% milk", "boneless chicken breasts") to searchable tokens. */
 function ingredientTokens(raw: string): string[] {
   let s = raw.toLowerCase().trim();
   s = s.replace(
@@ -77,28 +71,23 @@ function ingredientTokens(raw: string): string[] {
   if (full.length > 2) tokens.add(full);
   if (singular.length > 1) {
     const last = singular[singular.length - 1];
-    if (last.length > 2) tokens.add(last); // core noun, e.g. "chicken" from "chicken breast"
+    if (last.length > 2) tokens.add(last);
   }
   return [...tokens];
 }
 
-/** Individual words (≥3 chars) an ingredient name reduces to — for word-level pantry matching. */
 function wordsOf(name: string): string[] {
   return ingredientTokens(name).flatMap((t) => t.split(" ")).filter((w) => w.length >= 3);
 }
 
-/** Ubiquitous seasonings/basics assumed to be on hand, shown separately (never as "in pantry"). */
 function isStaple(name: string): boolean {
   return /\b(salt|pepper|sugar|water|ice|oil|cooking spray|non[- ]?stick spray|seasoning)\b/i.test(name);
 }
-
-/* --------------------------- equipment classifier -------------------------- */
 
 function inferMethods(instructions: string): string[] {
   const t = instructions.toLowerCase();
   const m = new Set<string>();
 
-  // Explicit appliance mentions.
   if (/air[- ]?fry|air[- ]?fryer/.test(t)) m.add("Air fryer");
   if (/microwave/.test(t)) m.add("Microwave");
   if (/slow cooker|crock[- ]?pot/.test(t)) m.add("Slow cooker");
@@ -108,16 +97,12 @@ function inferMethods(instructions: string): string[] {
   if (/\bkettle\b/.test(t)) m.add("Kettle");
   if (/\b(toaster|sandwich press|panini)\b/.test(t)) m.add("Toaster");
 
-  // Oven cues (bake/roast/broil, temperatures, preheat).
   if (/\b(bake|baking|baked|roast|roasted|broil|oven|preheat)\b/.test(t) || /°\s?[cf]|gas mark|\bdegrees?\b/.test(t)) m.add("Oven");
 
-  // Grill / barbecue.
   if (/\b(barbecue|bbq|char[- ]?grill|griddle|grill pan|grill)\b/.test(t)) m.add("Grill");
 
-  // Stovetop cues.
   if (/\b(fry|fried|frying|deep[- ]?fry|shallow[- ]?fry|stir[- ]?fry|pan[- ]?fry|saut[ée]|sear|skillet|frying pan|saucepan|sauce pan|wok|boil|boiling|simmer|poach|blanch|steam|braise|brown the|caramel|reduce the|melt|heat the oil|over (?:medium|high|low) heat|on the (?:hob|stove))\b/.test(t)) m.add("Stove");
 
-  // Generic cooking verb but no equipment matched → assume a stovetop (conservative, not "no-cook").
   if (m.size === 0 && /\b(cook|cooked|cooking|heat|heated|warm|hot|prepare)\b/.test(t)) m.add("Stove");
 
   if (m.size === 0) m.add("No-cook");
@@ -125,7 +110,7 @@ function inferMethods(instructions: string): string[] {
 }
 
 function buildCapabilities(appliances: string[], access: string) {
-  const kitchen = access !== "none"; // shared / full dorm kitchens include a stove + oven
+  const kitchen = access !== "none";
   const has = (re: RegExp) => appliances.some((a) => re.test(a));
   return {
     stove: kitchen || has(/stove|hot plate/i) || appliances.includes("Instant Pot"),
@@ -159,8 +144,6 @@ function coversMethod(method: string, c: Caps): boolean {
     default: return true;
   }
 }
-
-/* ------------------------------- parsing ---------------------------------- */
 
 function parseSteps(raw: string): string[] {
   const text = (raw || "").replace(/\r/g, "\n").trim();
@@ -202,7 +185,6 @@ export async function POST(req: Request) {
   const vegetarian = /vegetarian|vegan|no meat|plant/.test(diet);
   const caps = buildCapabilities(appliances, access);
 
-  // Word set of what the student actually has, plus per-ingredient search terms.
   const pantryWords = new Set<string>();
   const searchTerms = new Set<string>();
   for (const raw of ingredients) {
@@ -210,8 +192,6 @@ export async function POST(req: Request) {
     for (const t of ingredientTokens(raw)) if (!isStaple(t)) searchTerms.add(t);
   }
 
-  // 1) Find candidate meals by filtering TheMealDB on each pantry ingredient; tally how many
-  //    of the student's ingredients point at each meal (higher = uses more of what they have).
   const tally = new Map<string, number>();
   const terms = [...searchTerms].slice(0, 12);
   const filterResults = await Promise.all(
@@ -221,7 +201,6 @@ export async function POST(req: Request) {
     for (const m of r?.meals ?? []) tally.set(m.idMeal, (tally.get(m.idMeal) ?? 0) + 1);
   }
 
-  // If the pantry gave us nothing to search on, offer a few real recipes to browse.
   let candidateIds = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 18).map(([id]) => id);
   if (candidateIds.length === 0) {
     const randoms = await Promise.all(
@@ -232,7 +211,6 @@ export async function POST(req: Request) {
     candidateIds = [...ids];
   }
 
-  // 2) Look up full details for each candidate (real instructions, measures, source, video).
   const details = await Promise.all(
     candidateIds.map((id) => getJson<{ meals: MealDbMeal[] | null }>(`${API}/lookup.php?i=${encodeURIComponent(id)}`)),
   );
@@ -278,7 +256,6 @@ export async function POST(req: Request) {
     });
   }
 
-  // 3) Rank: what you can cook first, then most pantry coverage, then fewest items to buy.
   recipes.sort((a, b) => {
     if (a.canMake !== b.canMake) return a.canMake ? -1 : 1;
     if (b.uses.length !== a.uses.length) return b.uses.length - a.uses.length;
