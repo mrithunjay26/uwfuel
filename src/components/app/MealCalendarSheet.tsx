@@ -14,6 +14,9 @@ const MONTHS = [
 const key = (y: number, m: number, d: number) =>
   `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function MealCalendarSheet({
   open, onClose, selected, today, onSelect,
 }: {
@@ -23,6 +26,7 @@ export function MealCalendarSheet({
   today: string;
   onSelect: (dateKey: string) => void;
 }) {
+  const drag = useSheetDrag(onClose);
   const loggedDays = useFoodLogDays();
   const [view, setView] = useState(() => {
     const [y, m] = selected.split("-").map(Number);
@@ -48,7 +52,8 @@ export function MealCalendarSheet({
     <Portal>
     <div className="fixed inset-0 z-[75] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="animate-rise relative mt-auto rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]">
+      <div className="animate-rise relative mt-auto rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]" style={drag.sheetStyle}>
+        <DragHandle handleProps={drag.handleProps} />
         <div className="flex items-center justify-between">
           <h2 className="flex items-center gap-2 font-display text-[17px] font-extrabold text-ink">
             <CalendarDays className="size-[18px] text-accent" /> Jump to a day

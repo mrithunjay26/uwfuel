@@ -15,6 +15,7 @@ import {
   DollarSign,
   Flame,
   Footprints,
+  Heart,
   Loader2,
   MapPin,
   Minus,
@@ -23,8 +24,11 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Shuffle,
   Sliders,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Utensils,
 } from "lucide-react";
@@ -38,6 +42,11 @@ import { useFoodExpenses } from "@/lib/hooks/useFoodExpenses";
 import { filterSafeCandidates } from "@/lib/dietary/safety";
 import { computeBudgetSnapshot } from "@/lib/budget/compute";
 import { useActivePlan }   from "@/lib/hooks/useActivePlan";
+import { useMealPrefs }    from "@/lib/hooks/useMealPrefs";
+import { substituteOptions } from "@/lib/planner/substitute";
+import { mealFoodKey }      from "@/lib/planner/tasteKey";
+import { useMealTiming }   from "@/lib/hooks/useMealTiming";
+import { minutesToClock, clockToMinutes, MEAL_TIMING_TYPES, type MealTiming } from "@/lib/planner/mealTiming";
 import { usePlanRepo }     from "@/lib/hooks/usePlanRepo";
 import {
   useGeolocation,
@@ -55,7 +64,7 @@ import {
 } from "@/lib/planner/fitDay";
 import { useFoodInventory } from "@/lib/hooks/useFoodInventory";
 import { extractJsonObject } from "@/lib/ai/json";
-import { setActivePlan, clearActivePlan, savePlanToRepo, deletePlanFromRepo, logFoodItem, newPlanId } from "@/lib/db/userDb";
+import { setActivePlan, clearActivePlan, savePlanToRepo, deletePlanFromRepo, logFoodItem, newPlanId, logTasteEvent, setMealRating, writeMealTiming } from "@/lib/db/userDb";
 import {
   getDiningLocations,
   resolveMenuDate,
@@ -81,15 +90,14 @@ import {
   estimateMacros,
 } from "@/lib/utils/nutrition";
 import {
-  scheduleMealReminders,
   sendTestNotification,
-  cancelMealReminders,
+  clearAllReminders,
   requestNotificationPermission,
   notificationsGranted,
 } from "@/lib/utils/notifications";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { MealRouteMap, type RoutePoint } from "@/components/app/MealRouteMap";
-import type { ClassStop, MealPlan, PlanMeal, MealType } from "@/lib/db/types";
+import type { ClassStop, MealPlan, PlanMeal, MealType, MealRatingValue } from "@/lib/db/types";
 import type { PlanRepoItem } from "@/lib/hooks/usePlanRepo";
 
 type PlanTab = "ai" | "manual";
@@ -97,17 +105,27 @@ const MEAL_COUNTS = [2, 3, 4, 5] as const;
 type MealCount = typeof MEAL_COUNTS[number];
 const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
-const PROMPT_MENU_LIMIT = 45;
+const PROMPT_MENU_LIMIT = 60;
+
+function diversifyByLocation(items: PlannerItem[], limit: number): PlannerItem[] {
+  const byLoc = new Map<string, PlannerItem[]>();
+  for (const it of items) {
+    const g = byLoc.get(it.location_name) ?? [];
+    g.push(it);
+    byLoc.set(it.location_name, g);
+  }
+  const buckets = [...byLoc.values()];
+  const out: PlannerItem[] = [];
+  for (let r = 0; out.length < limit && buckets.some((b) => b.length > r); r++) {
+    for (const b of buckets) {
+      if (r < b.length) { out.push(b[r]); if (out.length >= limit) break; }
+    }
+  }
+  return out;
+}
 const AI_TIMEOUT_MS = 25_000;
 
 const normItem = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-
-const MEAL_WINDOWS: Record<MealType, [number, number]> = {
-  Breakfast: [7 * 60, 10 * 60],
-  Lunch: [11 * 60 + 15, 14 * 60 + 30],
-  Dinner: [17 * 60, 20 * 60 + 30],
-  Snack: [14 * 60 + 45, 16 * 60 + 45],
-};
 
 interface ClassBlock { label: string; start: number; end: number; lat: number; lng: number }
 
@@ -286,14 +304,6 @@ function defaultTimeFor(type: MealType): string {
   }
 }
 
-function to24h(t: string): string {
-  try {
-    const [time, ampm] = t.split(" ");
-    const [h, m] = time.split(":").map(Number);
-    const h24 = ampm === "PM" && h !== 12 ? h + 12 : ampm === "AM" && h === 12 ? 0 : h;
-    return `${String(h24).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
-  } catch { return "12:00"; }
-}
 
 export default function PlanPage() {
   const { cohereKey, hasCohere, dailyBudget, setDailyBudget, remindersOn, setRemindersOn } = useConfig();
@@ -303,6 +313,8 @@ export default function PlanPage() {
   const { profile: setupProfile } = useOnboardingProfile();
   const { expenses } = useFoodExpenses();
   const { activePlan }          = useActivePlan();
+  const { profile: prefs, ratings: mealRatings } = useMealPrefs();
+  const { timing } = useMealTiming();
   const today                   = todayPacificKey();
   const { plans: savedPlans, loading: plansLoading } = usePlanRepo(today);
   const {
@@ -414,7 +426,7 @@ export default function PlanPage() {
   const planSlots = useMemo<PlannerSlot[]>(() => {
     let snackShift = 0;
     return slotTypesFor(mealCount).map((type) => {
-      const [from, to] = MEAL_WINDOWS[type];
+      const { from, to } = timing[type];
       let minute = from + 30;
       if (type === "Snack") {
         minute = from + snackShift;
@@ -425,7 +437,7 @@ export default function PlanPage() {
       const anchor = anchorClass(classBlocks, minute);
       return { type, time: clockLabel(minute), near: anchor ? { lat: anchor.lat, lng: anchor.lng } : null };
     });
-  }, [mealCount, classBlocks]);
+  }, [mealCount, classBlocks, timing]);
 
   const plannerPool = useMemo<PlannerItem[]>(
     () => eligibleMenuItems
@@ -557,6 +569,51 @@ export default function PlanPage() {
     },
     [handle, today],
   );
+
+  const rateMeal = useCallback(async (meal: PlanMeal, rating: MealRatingValue) => {
+    if (!handle) return;
+    await setMealRating(handle.db, handle.uid, { name: meal.item_name, location_id: meal.location_id, location_name: meal.location_name }, rating).catch(() => {});
+    await logTasteEvent(handle.db, handle.uid, { name: meal.item_name, location_id: meal.location_id, kind: "eaten" }).catch(() => {});
+  }, [handle]);
+
+  const swapMeal = useCallback(async (index: number, item: PlannerItem) => {
+    if (!handle || !activePlan) return;
+    const old = activePlan.meals[index];
+    if (!old) return;
+    const newMeal: PlanMeal = {
+      ...old,
+      item_name: item.name,
+      location_id: item.location_id,
+      location_name: item.location_name,
+      estimated_calories: item.calories,
+      estimated_protein: item.protein,
+      estimated_cost: item.price,
+      add_ons: [],
+    };
+    const meals = activePlan.meals.map((m, i) => (i === index ? newMeal : m));
+    const daily_totals = {
+      calories: meals.reduce((sum, m) => sum + m.estimated_calories, 0),
+      protein: meals.reduce((sum, m) => sum + m.estimated_protein, 0),
+      cost: Math.round(meals.reduce((sum, m) => sum + m.estimated_cost, 0) * 100) / 100,
+    };
+    await setActivePlan(handle.db, handle.uid, { ...activePlan, meals, daily_totals }).catch(() => {});
+    await logTasteEvent(handle.db, handle.uid, { name: old.item_name, location_id: old.location_id, kind: "substituted" }).catch(() => {});
+  }, [handle, activePlan]);
+
+  const dayCost = activePlan?.daily_totals?.cost ?? 0;
+  const subsFor = useCallback((meal: PlanMeal) => substituteOptions({
+    pool: plannerPool,
+    currentName: meal.item_name,
+    currentCalories: meal.estimated_calories,
+    maxPrice: budget - (dayCost - meal.estimated_cost),
+    profile: prefs,
+    limit: 5,
+  }), [plannerPool, budget, dayCost, prefs]);
+
+  const saveMealTiming = useCallback((next: MealTiming) => {
+    if (!handle) return;
+    void writeMealTiming(handle.db, handle.uid, next).catch(() => {});
+  }, [handle]);
 
   const routeHints = useMemo(() => {
     if (!todayStops.length || !locations) return [];
@@ -795,8 +852,7 @@ export default function PlanPage() {
   const buildPrompt = useCallback(() => {
     const budgetStr   = budget.toFixed(2);
 
-    const sample = plannerPool
-      .slice(0, PROMPT_MENU_LIMIT)
+    const sample = diversifyByLocation(plannerPool, PROMPT_MENU_LIMIT)
       .map((i) => `- ${i.name} @ ${i.location_name} â€” $${i.price.toFixed(2)}, ${i.calories} cal, ${Math.round(i.protein)}g protein`)
       .join("\n");
 
@@ -824,6 +880,11 @@ export default function PlanPage() {
 
     const requestCtx = customRequest.trim()
       ? `STUDENT'S SPECIAL REQUESTS â€” follow these closely (dietary needs, cuisines, allergies, dislikes, timing, etc.): ${customRequest.trim()}`
+      : "";
+
+    const prefLines = prefs.promptLines((id) => locations?.[id]?.name);
+    const prefCtx = prefLines.length
+      ? `WHAT YOU KNOW ABOUT THIS STUDENT (use it, keep some variety, keep exploring new foods):\n${prefLines.join("\n")}`
       : "";
 
     const system = `You are a UW Seattle campus nutrition AI that builds meal plans from a REAL menu.
@@ -861,7 +922,7 @@ Goal: ${phase} phase Â· ${targetKcal} kcal target Â· ${weight} lbs.
 
 WHEN AND WHERE:
 ${shape}
-${requestCtx ? requestCtx + "\n" : ""}${nearbyCtx ? nearbyCtx + "\n" : ""}${classCtx ? classCtx + "\n" : ""}${routeCtx ? routeCtx + "\n" : ""}
+${prefCtx ? prefCtx + "\n" : ""}${requestCtx ? requestCtx + "\n" : ""}${nearbyCtx ? nearbyCtx + "\n" : ""}${classCtx ? classCtx + "\n" : ""}${routeCtx ? routeCtx + "\n" : ""}
 MENU â€” choose ONLY from these real items and use their EXACT prices:
 ${sample || "(No menu items are available within this budget right now.)"}
 
@@ -871,7 +932,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
       { role: "system" as const, content: system },
       { role: "user"   as const, content: user   },
     ];
-  }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest]);
+  }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest, prefs, locations]);
 
   function buildPlan(picks: PlannerPick[]): { meals: PlanMeal[]; notes: string[] } {
     return fitDay({
@@ -882,6 +943,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
       budget,
       targetKcal,
       picks,
+      bias: (item) => prefs.bias({ name: item.name, location_id: item.location_id }),
     });
   }
 
@@ -899,13 +961,8 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
       setActivePlan(handle.db, handle.uid, { plan_id: planId, source: meta.source, title: meta.title, date: today, daily_totals, meals }),
     ]).catch((e) => setGenError(e instanceof Error ? `Couldn't save this plan: ${e.message}` : "Couldn't save this plan."));
 
-    if (remindersOn && notifGranted) {
-      void scheduleMealReminders(meals.map((m) => ({
-        mealType:     m.meal_type,
-        time:         to24h(m.suggested_time),
-        locationName: m.location_name,
-        itemName:     m.item_name,
-      }))).catch(() => {});
+    for (const m of meals) {
+      void logTasteEvent(handle.db, handle.uid, { name: m.item_name, location_id: m.location_id, kind: "planned" }).catch(() => {});
     }
   }
 
@@ -1067,18 +1124,8 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
   async function handleClearPlan() {
     if (!handle) return;
     await clearActivePlan(handle.db, handle.uid);
-    cancelMealReminders();
+    clearAllReminders();
   }
-
-  const remindersForPlan = useCallback(() => {
-    if (!activePlan) return [];
-    return activePlan.meals.map((m) => ({
-      mealType:     m.meal_type,
-      time:         to24h(m.suggested_time),
-      locationName: m.location_name,
-      itemName:     m.item_name,
-    }));
-  }, [activePlan]);
 
   async function handleToggleReminders() {
     if (!notifGranted) {
@@ -1090,17 +1137,10 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
     setRemindersOn(next);
     if (next) {
       await sendTestNotification();
-      await scheduleMealReminders(remindersForPlan());
     } else {
-      cancelMealReminders();
+      await clearAllReminders();
     }
   }
-
-  useEffect(() => {
-    if (remindersOn && notifGranted && activePlan) {
-      scheduleMealReminders(remindersForPlan());
-    }
-  }, [remindersOn, notifGranted, activePlan, remindersForPlan]);
 
   function toggleNearby() {
     const next = !nearbyOn;
@@ -1171,7 +1211,17 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
             </div>
             <div className="mt-3 flex flex-col gap-1.5">
               {activePlan.meals.map((meal, i) => (
-                <MealRow key={i} meal={meal} route={buildMealRoute(meal)} onLog={logMeal} />
+                <MealRow
+                  key={i}
+                  meal={meal}
+                  index={i}
+                  route={buildMealRoute(meal)}
+                  onLog={logMeal}
+                  rating={mealRatings[mealFoodKey(meal.item_name)]?.rating}
+                  options={subsFor(meal)}
+                  onRate={rateMeal}
+                  onSwap={swapMeal}
+                />
               ))}
             </div>
           </section>
@@ -1479,6 +1529,8 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
               </button>
             </section>
 
+            <MealTimingEditor timing={timing} onSave={saveMealTiming} />
+
             {profile && (
               <div className="glass-soft rounded-[16px] px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Using your profile</p>
@@ -1591,6 +1643,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
               </div>
             ) : (
               <button
+                data-tour="plan-generate"
                 onClick={handleGenerate}
                 disabled={!handle}
                 className="press flex w-full items-center justify-center gap-2 rounded-[18px] bg-accent py-4 text-[15px] font-bold text-accent-contrast shadow-[var(--shadow-md)] disabled:opacity-50"
@@ -1848,14 +1901,25 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
 
 function MealRow({
   meal,
+  index,
   route,
   onLog,
+  rating,
+  options,
+  onRate,
+  onSwap,
 }: {
   meal: PlanMeal;
+  index?: number;
   route?: MealRoute | null;
   onLog?: (meal: PlanMeal) => Promise<void>;
+  rating?: MealRatingValue;
+  options?: PlannerItem[];
+  onRate?: (meal: PlanMeal, rating: MealRatingValue) => void;
+  onSwap?: (index: number, item: PlannerItem) => void;
 }) {
   const [showMap, setShowMap] = useState(false);
+  const [showSwap, setShowSwap] = useState(false);
   const [mode, setMode] = useState<TravelMode>("walking");
   const [logState, setLogState] = useState<"idle" | "logging" | "logged">("idle");
 
@@ -1900,6 +1964,33 @@ function MealRow({
         </div>
       </div>
 
+      {(onRate || onSwap) && (
+        <div className="mt-2 flex items-center gap-1.5">
+          {onRate && (
+            <div className="flex items-center gap-1">
+              <RatePill active={rating === "bad"} onClick={() => onRate(meal, "bad")} icon={<ThumbsDown className="size-3" />} label="Bad" tone="danger" />
+              <RatePill active={rating === "good"} onClick={() => onRate(meal, "good")} icon={<ThumbsUp className="size-3" />} label="Good" tone="ink" />
+              <RatePill active={rating === "loved"} onClick={() => onRate(meal, "loved")} icon={<Heart className="size-3" />} label="Loved" tone="accent" />
+            </div>
+          )}
+          {onSwap && (options?.length ?? 0) > 0 && (
+            <button onClick={() => setShowSwap((v) => !v)} className="press ml-auto flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-bold text-ink-soft">
+              <Shuffle className="size-3" /> Swap
+            </button>
+          )}
+        </div>
+      )}
+      {showSwap && onSwap && (options?.length ?? 0) > 0 && (
+        <div className="mt-1.5 flex flex-col gap-1 rounded-[10px] bg-surface-2 p-1.5">
+          <p className="px-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">Swap for something else today</p>
+          {options!.map((opt) => (
+            <button key={opt.key} onClick={() => { onSwap(index ?? 0, opt); setShowSwap(false); }} className="press flex items-center justify-between gap-2 rounded-[8px] bg-surface px-2 py-1.5 text-left">
+              <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-ink">{opt.name}<span className="font-normal text-ink-faint"> Â· {opt.location_name}</span></span>
+              <span className="shrink-0 text-[11px] text-ink-soft">{opt.calories} cal Â· {formatMoney(opt.price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {onLog && (
         <button
           onClick={handleLog}
@@ -1966,5 +2057,95 @@ function MealRow({
         </div>
       )}
     </div>
+  );
+}
+
+function RatePill({ active, onClick, icon, label, tone }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; tone: "danger" | "ink" | "accent" }) {
+  const cls = active
+    ? tone === "danger" ? "bg-danger/15 text-danger" : tone === "accent" ? "bg-accent text-accent-contrast" : "bg-ink/10 text-ink"
+    : "bg-surface-2 text-ink-faint";
+  return (
+    <button onClick={onClick} aria-label={label} title={label} className={`press flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-bold transition ${cls}`}>
+      {icon}
+    </button>
+  );
+}
+
+function MealTimingEditor({ timing, onSave }: { timing: MealTiming; onSave: (next: MealTiming) => void }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<MealTiming>(timing);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => { if (!dirty) setDraft(timing); }, [timing, dirty]);
+
+  const setField = (type: MealType, field: "from" | "to", clock: string) => {
+    setDirty(true);
+    setDraft((d) => ({ ...d, [type]: { ...d[type], [field]: clockToMinutes(clock) } }));
+  };
+
+  const invalid = MEAL_TIMING_TYPES.some((t) => draft[t].to <= draft[t].from);
+
+  const save = () => {
+    if (invalid) return;
+    onSave(draft);
+    setDirty(false);
+    setOpen(false);
+  };
+
+  return (
+    <section className="glass-panel overflow-hidden rounded-[22px]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3.5"
+      >
+        <div className="flex items-center gap-2">
+          <Clock className="size-4 text-accent" />
+          <div className="text-left">
+            <p className="text-[14px] font-bold text-ink">Meal timing</p>
+            <p className="text-[11px] text-ink-soft">When you like to eat each meal</p>
+          </div>
+        </div>
+        {open ? <ChevronUp className="size-4 text-ink-soft" /> : <ChevronDown className="size-4 text-ink-soft" />}
+      </button>
+      {open && (
+        <div className="border-t border-line px-4 py-3">
+          <div className="flex flex-col gap-2">
+            {MEAL_TIMING_TYPES.map((type) => {
+              const w = draft[type];
+              const bad = w.to <= w.from;
+              return (
+                <div key={type} className="flex items-center gap-2">
+                  <span className="w-16 shrink-0 text-[12px] font-bold text-ink">{type}</span>
+                  <input
+                    type="time"
+                    value={minutesToClock(w.from)}
+                    onChange={(e) => setField(type, "from", e.target.value)}
+                    className={`flex-1 rounded-[10px] border bg-surface-2 px-2 py-1.5 text-[13px] text-ink outline-none ${bad ? "border-danger" : "border-line"}`}
+                  />
+                  <span className="text-[12px] text-ink-faint">to</span>
+                  <input
+                    type="time"
+                    value={minutesToClock(w.to)}
+                    onChange={(e) => setField(type, "to", e.target.value)}
+                    className={`flex-1 rounded-[10px] border bg-surface-2 px-2 py-1.5 text-[13px] text-ink outline-none ${bad ? "border-danger" : "border-line"}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {invalid && <p className="mt-2 text-[11px] font-semibold text-danger">Each end time must be after its start time.</p>}
+          <div className="mt-3 flex items-center justify-between">
+            <p className="text-[11px] text-ink-faint">Used by the planner and My Day.</p>
+            <button
+              onClick={save}
+              disabled={invalid || !dirty}
+              className="press rounded-full bg-accent px-4 py-1.5 text-[12px] font-bold text-accent-contrast disabled:opacity-40"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

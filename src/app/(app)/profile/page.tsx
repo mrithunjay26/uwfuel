@@ -40,6 +40,7 @@ import { writeKitchenProfile } from "@/lib/db/userDb";
 import { APPLIANCES } from "@/lib/pantry/pantry";
 import type { KitchenAccess } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
+import { useTutorial } from "@/lib/tutorial/TutorialContext";
 
 const REPO_URL = "https://github.com/mrithunjay26/uwfuel";
 
@@ -52,6 +53,7 @@ export default function ProfilePage() {
     showWorkoutTabs, setShowWorkoutTabs,
   } = useConfig();
   const { theme, toggle } = useTheme();
+  const { start: startTour } = useTutorial();
   const { schedule: classSchedule, todayStops } = useClassSchedule();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [dbExpanded, setDbExpanded] = useState(false);
@@ -250,6 +252,7 @@ export default function ProfilePage() {
 
         <section className="glass-panel rounded-[20px] p-1.5">
           <button
+            data-tour="customize"
             onClick={() => { haptic("light"); setCustomizerOpen(true); }}
             className="flex w-full items-center justify-between rounded-[15px] px-3 py-3 active:bg-surface-2"
           >
@@ -259,6 +262,16 @@ export default function ProfilePage() {
                 <span className="block text-[14px] font-semibold text-ink">Customize</span>
                 <span className="block text-[11px] text-ink-soft">Colors, background, nav, fonts &amp; more</span>
               </span>
+            </span>
+            <ChevronRight className="size-4 text-ink-faint" />
+          </button>
+          <button
+            onClick={() => { haptic("light"); startTour(); }}
+            className="flex w-full items-center justify-between rounded-[15px] px-3 py-3 active:bg-surface-2"
+          >
+            <span className="flex items-center gap-2.5 text-[14px] font-semibold text-ink">
+              <Sparkles className="size-[18px] text-accent" />
+              Replay app tour
             </span>
             <ChevronRight className="size-4 text-ink-faint" />
           </button>

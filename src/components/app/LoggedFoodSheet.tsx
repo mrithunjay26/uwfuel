@@ -14,7 +14,11 @@ interface LoggedFoodSheetProps {
   onSave?: (id: string, patch: Partial<Omit<FoodLogEntry, "logged_at">>) => void;
 }
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFoodSheetProps) {
+  const drag = useSheetDrag(onClose);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "", price: "", funding: "unknown" });
 
@@ -68,9 +72,9 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
         aria-modal="true"
         aria-label={entry.name}
         className="glass-strong animate-rise fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-[480px] flex-col rounded-t-[28px] px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-4"
-        style={{ maxHeight: "88dvh" }}
+        style={{ maxHeight: "88dvh", ...drag.sheetStyle }}
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
+        <DragHandle handleProps={drag.handleProps} className="mb-1" />
 
         <div className="thin-scrollbar flex-1 overflow-y-auto">
           <div className="flex items-start justify-between gap-3">

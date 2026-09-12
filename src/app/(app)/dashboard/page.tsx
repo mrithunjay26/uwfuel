@@ -15,6 +15,8 @@ import { SCAN_ENABLED } from "@/lib/nutrition/scan";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useConfig } from "@/lib/config/ConfigContext";
 import { useFoodLog, type FoodLogItem } from "@/lib/hooks/useFoodLog";
+import { useMealPrefs } from "@/lib/hooks/useMealPrefs";
+import { mealFoodKey } from "@/lib/planner/tasteKey";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { useWeightLog } from "@/lib/hooks/useWeightLog";
@@ -53,6 +55,7 @@ export default function DashboardPage() {
   const today = todayPacificKey();
   const [selectedDate, setSelectedDate] = useState(today);
   const { entries, totals, loading: logLoading } = useFoodLog(selectedDate);
+  const { ratings: mealRatings } = useMealPrefs();
   const { latest: latestWeight, points: weightPoints } = useWeightLog();
 
   const goalAssessment = useMemo(
@@ -327,6 +330,7 @@ export default function DashboardPage() {
               return SCAN_ENABLED ? (
                 <button
                   key={id}
+                  data-tour="log-fab"
                   onClick={() => setScanOpen(true)}
                   className="press mb-4 flex w-full items-center gap-3 rounded-[18px] border border-accent/25 bg-accent-soft px-4 py-3.5 text-left"
                 >
@@ -521,6 +525,7 @@ export default function DashboardPage() {
                   onDelete={handleDelete}
                   onSave={saveEntryToInventory}
                   onOpen={setFoodDetail}
+                  rating={mealRatings[mealFoodKey(entry.name)]?.rating}
                 />
               ))}
             </div>

@@ -31,6 +31,7 @@ export interface FitDayInput {
   budget: number;
   targetKcal: number;
   picks?: PlannerPick[];
+  bias?: (item: PlannerItem) => number;
 }
 
 export interface FitDayResult {
@@ -52,8 +53,9 @@ const TYPE_ORDER: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
 const KCAL_FLOOR = 0.95;
 const KCAL_CEILING = 1.08;
-const MAX_ADD_ONS_PER_MEAL = 2;
+const MAX_ADD_ONS_PER_MEAL = 0;
 const MAX_PASSES = 40;
+const BIAS_WEIGHT = 1.6;
 
 export function slotTypesFor(count: number): MealType[] {
   return Array.from({ length: Math.max(1, count) }, (_, i) => TYPE_ORDER[Math.min(i, TYPE_ORDER.length - 1)]);
@@ -93,6 +95,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
 
   const rank = new Map<string, number>();
   input.pool.forEach((item, i) => rank.set(item.key, 1 - i / Math.max(1, input.pool.length)));
+  const bias = (item: PlannerItem): number => input.bias?.(item) ?? 0;
 
   const shares = slots.map((s) => TYPE_SHARE[s.type] ?? 0.2);
   const shareSum = shares.reduce((a, b) => a + b, 0) || 1;
@@ -162,7 +165,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
     if (!main) {
       main = bestOf(
         input.pool,
-        (item) => (rank.get(item.key) ?? 0) * 1.4 + nearness(item, slot.near) * 2 + calorieFit(item.calories, want) * 1.6,
+        (item) => (rank.get(item.key) ?? 0) * 1.4 + nearness(item, slot.near) * 2 + calorieFit(item.calories, want) * 1.6 + bias(item) * BIAS_WEIGHT,
         (item) => item.price <= budget,
       );
     }

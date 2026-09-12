@@ -13,8 +13,7 @@ import { callCohere } from "@/lib/ai/cohere";
 import { setActivePlan, clearActivePlan, savePlanToRepo } from "@/lib/db/userDb";
 import { maintenanceCalories, dailyTargetCalories, weeklyChangeLbsFromPhase } from "@/lib/utils/nutrition";
 import {
-  scheduleMealReminders,
-  cancelMealReminders,
+  clearAllReminders,
   requestNotificationPermission,
   notificationsGranted,
 } from "@/lib/utils/notifications";
@@ -41,7 +40,11 @@ function mealTimeForIndex(index: number, totalMeals: number): string {
   return `${h12}:00 ${ampm}`;
 }
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function MealPlannerSheet({ open, onClose, menuItems }: MealPlannerSheetProps) {
+  const drag = useSheetDrag(onClose);
   const { cohereKey, hasCohere } = useConfig();
   const handle = useUserDb();
   const { profile } = useUserProfile();
@@ -198,16 +201,6 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
       };
       await setActivePlan(handle.db, handle.uid, active);
 
-      if (remindersOn && notifGranted) {
-        await scheduleMealReminders(
-          meals.map((m) => ({
-            mealType: m.meal_type,
-            time: convertTo24Hour(m.suggested_time),
-            locationName: m.location_name,
-            itemName: m.item_name,
-          })),
-        );
-      }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         setError(e instanceof Error ? e.message : "Generation failed. Try again.");
@@ -225,13 +218,13 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
     }
     const next = !remindersOn;
     setRemindersOn(next);
-    if (!next) cancelMealReminders();
+    if (!next) clearAllReminders();
   }
 
   async function handleClearPlan() {
     if (!handle) return;
     await clearActivePlan(handle.db, handle.uid);
-    cancelMealReminders();
+    clearAllReminders();
   }
 
   if (!open) return null;
@@ -247,9 +240,9 @@ Keep daily cost under $25. Prioritize high-protein for ${phase === "cut" ? "a cu
         aria-modal="true"
         aria-label="AI Meal Planner"
         className="animate-rise fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[480px] rounded-t-[28px] bg-surface px-5 pb-[max(env(safe-area-inset-bottom),24px)] pt-5 shadow-[var(--shadow-lg)]"
-        style={{ maxHeight: "92dvh", display: "flex", flexDirection: "column" }}
+        style={{ maxHeight: "92dvh", display: "flex", flexDirection: "column", ...drag.sheetStyle }}
       >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line-strong" />
+        <DragHandle handleProps={drag.handleProps} className="mb-1.5" />
 
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -429,13 +422,4 @@ function PlanMealRow({ meal }: { meal: PlanMeal }) {
   );
 }
 
-function convertTo24Hour(timeStr: string): string {
-  try {
-    const [time, ampm] = timeStr.split(" ");
-    const [h, m] = time.split(":").map(Number);
-    const hour24 = ampm === "PM" && h !== 12 ? h + 12 : ampm === "AM" && h === 12 ? 0 : h;
-    return `${String(hour24).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
-  } catch {
-    return "12:00";
-  }
-}
+

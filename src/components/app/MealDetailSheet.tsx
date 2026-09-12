@@ -6,6 +6,8 @@ import { Check, Clock, Leaf, MapPin, Plus, ShoppingBag, X } from "lucide-react";
 import { estimateMacros, estimateProteinGrams } from "@/lib/utils/nutrition";
 import { isOrderable, orderUrlFor, needsSearchAssist } from "@/lib/dining/ordering";
 import type { FlatMenuItem } from "@/lib/menu/flattenMenu";
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
 
 interface MealDetailSheetProps {
   item: FlatMenuItem | null;
@@ -15,6 +17,7 @@ interface MealDetailSheetProps {
 }
 
 export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailSheetProps) {
+  const drag = useSheetDrag(onClose);
   if (!item || typeof document === "undefined") return null;
 
   const protein = item.protein_grams > 0
@@ -41,9 +44,9 @@ export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailS
         aria-modal="true"
         aria-label={item.name}
         className="glass-strong animate-rise fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-[480px] flex-col rounded-t-[28px] px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-4"
-        style={{ maxHeight: "90dvh" }}
+        style={{ maxHeight: "90dvh", ...drag.sheetStyle }}
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" />
+        <DragHandle handleProps={drag.handleProps} className="mb-1" />
 
         <div className="thin-scrollbar flex-1 overflow-y-auto">
           <div className="flex items-start justify-between gap-3">

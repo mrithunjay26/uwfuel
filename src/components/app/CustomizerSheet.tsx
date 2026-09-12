@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, BellRing, Check, ChevronDown, ChevronUp, Contrast, Eye, EyeOff, Gauge, Hand, Image as ImageIcon, LayoutGrid, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
+import { Activity, BellRing, Check, ChevronDown, ChevronUp, Contrast, Eye, EyeOff, Gauge, Hand, Image as ImageIcon, LayoutGrid, Loader2, Lock, Moon, MoonStar, Navigation, Paintbrush, RotateCcw, Sparkles, Sun, X, Zap } from "lucide-react";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { useConfig } from "@/lib/config/ConfigContext";
+import { validateCartoKey } from "@/lib/map/tiles";
 import { useTheme } from "@/lib/theme/ThemeContext";
 import { Portal } from "@/components/ui/Portal";
 import {
@@ -42,7 +43,11 @@ import {
   toggleHomeSection,
 } from "@/lib/customize/homeSections";
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const drag = useSheetDrag(onClose);
   const { customize, setCustomize, reset } = useCustomize();
   const { theme, toggle } = useTheme();
   const [hexInput, setHexInput] = useState(customize.accent);
@@ -65,7 +70,8 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
     <div className="fixed inset-0 z-[70] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
-      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg shadow-[var(--shadow-lg)]">
+      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg shadow-[var(--shadow-lg)]" style={drag.sheetStyle}>
+        <DragHandle handleProps={drag.handleProps} />
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
             <Paintbrush className="size-[18px] text-accent" />
@@ -201,16 +207,7 @@ export function CustomizerSheet({ open, onClose }: { open: boolean; onClose: () 
           </Group>
 
           <Group title="Maps" hint="Used by My Day, the dining map and every route preview.">
-            <Chips<MapStyle>
-              value={customize.mapStyle}
-              onChange={(mapStyle) => setCustomize({ mapStyle })}
-              options={[
-                { v: "standard", label: "Standard" },
-                { v: "light", label: "Muted" },
-                { v: "dark", label: "Dark" },
-              ]}
-            />
-            <p className="mt-1.5 text-[11px] text-ink-soft">Muted and Dark make pins and routes easier to pick out. Reopen a map to see the change.</p>
+            <MapStyleControl customize={customize} setCustomize={setCustomize} />
           </Group>
 
           <Group title="Home layout" hint="Hide anything you don't use, and put the shortcuts you do use first.">
@@ -707,5 +704,82 @@ function Toggle({
         <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all" style={{ left: on ? "1.375rem" : "0.125rem" }} />
       </span>
     </button>
+  );
+}
+
+function MapStyleControl({ customize, setCustomize }: { customize: Customize; setCustomize: (patch: Partial<Customize>) => void }) {
+  const hasKey = !!customize.cartoKey;
+  const [keyInput, setKeyInput] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const options: { v: MapStyle; label: string }[] = [
+    { v: "standard", label: "Standard" },
+    { v: "light", label: "Muted" },
+    { v: "dark", label: "Dark" },
+  ];
+
+  async function verify() {
+    const k = keyInput.trim();
+    if (!k) return;
+    setVerifying(true);
+    setErr(null);
+    const ok = await validateCartoKey(k);
+    setVerifying(false);
+    if (ok) {
+      setCustomize({ cartoKey: k });
+      setKeyInput("");
+    } else {
+      setErr("That key did not work. Check it and try again.");
+    }
+  }
+
+  return (
+    <>
+      <div className="flex gap-2">
+        {options.map((o) => {
+          const locked = o.v !== "standard" && !hasKey;
+          const active = customize.mapStyle === o.v;
+          return (
+            <button
+              key={o.v}
+              disabled={locked}
+              onClick={() => { if (!locked) setCustomize({ mapStyle: o.v }); }}
+              className={`press flex flex-1 items-center justify-center gap-1 rounded-[12px] py-2 text-[12px] font-bold transition ${active ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"} ${locked ? "opacity-60" : ""}`}
+            >
+              {o.label}
+              {locked && <Lock className="size-3" />}
+            </button>
+          );
+        })}
+      </div>
+      {hasKey ? (
+        <div className="mt-2 flex items-center justify-between rounded-[12px] bg-surface-2 px-3 py-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-soft"><Check className="size-3.5 text-success" /> CARTO key saved</span>
+          <button onClick={() => setCustomize({ cartoKey: "", mapStyle: "standard" })} className="text-[11px] font-bold text-danger">Remove</button>
+        </div>
+      ) : (
+        <div className="mt-2 rounded-[12px] bg-surface-2 p-3">
+          <p className="text-[11px] leading-relaxed text-ink-soft">Standard maps are free and need nothing. Muted and Dark use CARTO tiles, which need a free CARTO API key. Paste one to unlock them.</p>
+          <div className="mt-2 flex gap-2">
+            <input
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="CARTO API key"
+              className="min-w-0 flex-1 rounded-[10px] border border-line bg-surface px-3 py-2 text-[12px] text-ink outline-none focus:border-accent"
+            />
+            <button
+              onClick={verify}
+              disabled={verifying || !keyInput.trim()}
+              className="press flex items-center gap-1 rounded-[10px] bg-accent px-3 py-2 text-[12px] font-bold text-accent-contrast disabled:opacity-40"
+            >
+              {verifying ? <Loader2 className="size-3.5 animate-spin" /> : null} Verify
+            </button>
+          </div>
+          {err && <p className="mt-1.5 text-[11px] font-semibold text-danger">{err}</p>}
+        </div>
+      )}
+      <p className="mt-1.5 text-[11px] text-ink-soft">Reopen a map to see the change.</p>
+    </>
   );
 }

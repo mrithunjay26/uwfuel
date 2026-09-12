@@ -1,4 +1,5 @@
-import type { ClassStop, PlanMeal, WorkoutPlanDay } from "@/lib/db/types";
+import type { ClassStop, MealType, PlanMeal, WorkoutPlanDay } from "@/lib/db/types";
+import type { MealTiming } from "@/lib/planner/mealTiming";
 import { resolveCampusPlace, campusPlaceByCode } from "@/lib/campus/buildings";
 import { haversineMetres } from "@/lib/geo/distance";
 
@@ -48,8 +49,10 @@ const MEAL_WINDOWS: Record<string, MealWindow> = {
 
 const ANY_MEAL_WINDOW: MealWindow = { from: 8 * 60, to: 21 * 60, minutes: 30 };
 
-function mealWindow(type: string): MealWindow {
-  return MEAL_WINDOWS[String(type || "").toLowerCase()] ?? ANY_MEAL_WINDOW;
+function mealWindow(type: string, timing?: MealTiming): MealWindow {
+  const base = MEAL_WINDOWS[String(type || "").toLowerCase()] ?? ANY_MEAL_WINDOW;
+  const pref = timing?.[type as MealType];
+  return pref ? { from: pref.from, to: pref.to, minutes: base.minutes } : base;
 }
 
 const WORKOUT_MINUTES = 75;
@@ -110,6 +113,7 @@ export interface BuildDayInput {
   workout: WorkoutPlanDay | null;
   plannedMeals: PlanMeal[];
   diningPlaces: DayPlace[];
+  timing?: MealTiming;
   window?: DayWindow;
 }
 
@@ -136,13 +140,13 @@ export function buildDayPlan(input: BuildDayInput): DayEvent[] {
   const orderedMeals = input.plannedMeals
     .map((meal, order) => ({ meal, order }))
     .sort((a, b) => {
-      const ta = a.meal.suggested_time ? toMinutes(a.meal.suggested_time) : mealWindow(a.meal.meal_type).from;
-      const tb = b.meal.suggested_time ? toMinutes(b.meal.suggested_time) : mealWindow(b.meal.meal_type).from;
+      const ta = a.meal.suggested_time ? toMinutes(a.meal.suggested_time) : mealWindow(a.meal.meal_type, input.timing).from;
+      const tb = b.meal.suggested_time ? toMinutes(b.meal.suggested_time) : mealWindow(b.meal.meal_type, input.timing).from;
       return ta - tb || a.order - b.order;
     });
 
   for (const { meal: planned, order } of orderedMeals) {
-    const slot = mealWindow(planned.meal_type);
+    const slot = mealWindow(planned.meal_type, input.timing);
     const gaps = gapsBetween(events, window);
 
     let start: number | null = null;

@@ -5,6 +5,8 @@ import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { formatMoney } from "@/lib/utils/nutrition";
 import type { FoodLogItem } from "@/lib/hooks/useFoodLog";
+import type { MealRatingValue } from "@/lib/db/types";
+import { MealRatePills } from "@/components/app/MealRatePills";
 
 interface JournalCardProps {
   entry: FoodLogItem;
@@ -12,10 +14,11 @@ interface JournalCardProps {
   onDelete?: (id: string) => void;
   onSave?: (entry: FoodLogItem) => void;
   onOpen?: (entry: FoodLogItem) => void;
+  rating?: MealRatingValue;
   className?: string;
 }
 
-export function JournalCard({ entry, index = 0, onDelete, onSave, onOpen, className }: JournalCardProps) {
+export function JournalCard({ entry, index = 0, onDelete, onSave, onOpen, rating, className }: JournalCardProps) {
   void index;
   const time = formatLogTime(entry.logged_at);
   const [saved, setSaved] = useState(false);
@@ -88,6 +91,16 @@ export function JournalCard({ entry, index = 0, onDelete, onSave, onOpen, classN
       {time && (
         <p className="relative mt-0.5 text-[10px] text-ink-faint">{time}</p>
       )}
+
+      {!entry.is_custom && entry.name ? (
+        <MealRatePills
+          name={entry.name}
+          locationId={entry.location_id}
+          locationName={entry.location_name}
+          rating={rating}
+          className="relative mt-2"
+        />
+      ) : null}
     </div>
   );
 }

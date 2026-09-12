@@ -22,6 +22,10 @@ import {
   type DayEvent, type DayPlace,
 } from "@/lib/schedule/dayPlan";
 import { fetchWalkRoute, formatDistance, walkMinutes, type WalkRoute } from "@/lib/nav/walkRoute";
+import { useConfig } from "@/lib/config/ConfigContext";
+import { useMealTiming } from "@/lib/hooks/useMealTiming";
+import { remindersFromDayEvents } from "@/lib/schedule/reminderPlan";
+import { syncReminders, clearAllReminders, notificationsGranted } from "@/lib/utils/notifications";
 import type { Weekday } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
 
@@ -58,6 +62,8 @@ const FULL_MAP_PAD_BOTTOM = 210;
 export default function TodayPage() {
   const { schedule, stopsForDay, loading: scheduleLoading } = useClassSchedule();
   const { activePlan } = useActivePlan();
+  const { remindersOn } = useConfig();
+  const { timing } = useMealTiming();
   const workoutPlan = useActiveWorkoutPlan();
   const { customize, setCustomize } = useCustomize();
   const today = todayPacificKey();
@@ -116,9 +122,19 @@ export default function TodayPage() {
     plannedMeals:
       isToday && activePlan?.date === today && Array.isArray(activePlan.meals) ? activePlan.meals : [],
     diningPlaces,
-  }), [schedule, weekday, workoutDay, activePlan, diningPlaces, isToday]);
+    timing,
+  }), [schedule, weekday, workoutDay, activePlan, diningPlaces, isToday, timing]);
 
   const stops = useMemo(() => routeStops(events), [events]);
+
+  useEffect(() => {
+    if (!isToday) return;
+    if (!remindersOn || !notificationsGranted()) {
+      void clearAllReminders();
+      return;
+    }
+    void syncReminders(remindersFromDayEvents(today, events, Date.now()));
+  }, [isToday, remindersOn, events, today]);
   const hasSchedule = (schedule && Object.values(schedule).some((d) => (d?.length ?? 0) > 0)) || false;
   const showFullMap = fullMap && hasSchedule;
 

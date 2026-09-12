@@ -158,6 +158,32 @@ export interface DayTotals {
 
 export type MealType = "Breakfast" | "Lunch" | "Dinner" | "Snack";
 
+export type MealRatingValue = "bad" | "good" | "loved";
+
+export interface MealRating {
+  key: string;
+  name: string;
+  location_id: string;
+  location_name: string;
+  rating: MealRatingValue;
+  count: number;
+  updated_at: number;
+}
+
+export type MealRatingMap = Record<string, MealRating>;
+
+export type TasteEventKind = "eaten" | "planned" | "substituted" | "skipped";
+
+export interface TasteEvent {
+  key: string;
+  name: string;
+  location_id: string;
+  kind: TasteEventKind;
+  at: number;
+}
+
+export type TasteEventLog = Record<string, TasteEvent>;
+
 export interface PlanAddOn {
   item_name: string;
   location_id: string;

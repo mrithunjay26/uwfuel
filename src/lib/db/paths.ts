@@ -57,4 +57,9 @@ export const PATHS = {
   workoutLogs: (uid: string) => `users/${uid}/workout_logs`,
 
   workoutTemplates: (uid: string) => `users/${uid}/workout_templates`,
+
+  mealRatings: (uid: string) => `users/${uid}/meal_ratings`,
+  mealRating: (uid: string, key: string) => `users/${uid}/meal_ratings/${key}`,
+  tasteEvents: (uid: string) => `users/${uid}/taste_events`,
+  mealTiming: (uid: string) => `users/${uid}/meal_timing`,
 } as const;

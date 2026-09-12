@@ -24,7 +24,11 @@ const PHASE_OPTIONS: { value: GoalPhase; label: string; description: string }[] 
   { value: "bulk", label: "Bulk", description: "Build muscle" },
 ];
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalModalProps) {
+  const drag = useSheetDrag(onClose);
   const handle = useUserDb();
   const { dailyBudget, setDailyBudget } = useConfig();
   const { profile: setupProfile } = useOnboardingProfile();
@@ -133,8 +137,9 @@ export function GoalModal({ open, initial, initialBudget = 37, onClose }: GoalMo
         aria-modal="true"
         aria-label="Set your goals"
         className="animate-rise glass-panel fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[480px] rounded-t-[28px] px-5 pb-[max(env(safe-area-inset-bottom),24px)] pt-5 shadow-[var(--shadow-lg)]"
+        style={drag.sheetStyle}
       >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line-strong" />
+        <DragHandle handleProps={drag.handleProps} className="mb-1.5" />
 
         <div className="flex items-center justify-between">
           <h2 className="font-display text-[20px] font-extrabold text-ink">Your Goals</h2>

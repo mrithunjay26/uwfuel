@@ -49,6 +49,7 @@ export interface Customize {
   handedness: Handedness;
   showReachShortcut: boolean;
   mapStyle: MapStyle;
+  cartoKey: string;
   primaryAction: QuickAction;
   secondaryAction: QuickAction;
   startPage: StartPage;
@@ -92,6 +93,7 @@ export const DEFAULT_CUSTOMIZE: Customize = {
   handedness: "right",
   showReachShortcut: true,
   mapStyle: "standard",
+  cartoKey: "",
   primaryAction: "plan",
   secondaryAction: "log",
   startPage: "dashboard",
@@ -300,7 +302,8 @@ export function computeCustomize(c: Customize): ComputedCustomize {
     "data-haptic": c.hapticLevel,
     "data-haptic-duration": c.hapticDuration,
     "data-workout-oled": c.workoutOled ? "on" : "off",
-    "data-map": c.mapStyle,
+    "data-map": (c.mapStyle !== "standard" && !c.cartoKey) ? "standard" : c.mapStyle,
+    "data-carto": c.cartoKey || "",
   };
 
   return { vars, attrs };
@@ -341,6 +344,7 @@ export function parseCustomize(raw: unknown): Customize {
     handedness: (["left", "right"] as Handedness[]).includes(v.handedness as Handedness) ? (v.handedness as Handedness) : DEFAULT_CUSTOMIZE.handedness,
     showReachShortcut: typeof v.showReachShortcut === "boolean" ? v.showReachShortcut : DEFAULT_CUSTOMIZE.showReachShortcut,
     mapStyle: (["standard", "light", "dark"] as MapStyle[]).includes(v.mapStyle as MapStyle) ? (v.mapStyle as MapStyle) : DEFAULT_CUSTOMIZE.mapStyle,
+    cartoKey: typeof v.cartoKey === "string" ? v.cartoKey.slice(0, 200) : DEFAULT_CUSTOMIZE.cartoKey,
     primaryAction: QUICK_ACTION_KEYS.includes(v.primaryAction as QuickAction) ? (v.primaryAction as QuickAction) : DEFAULT_CUSTOMIZE.primaryAction,
     secondaryAction: QUICK_ACTION_KEYS.includes(v.secondaryAction as QuickAction) ? (v.secondaryAction as QuickAction) : DEFAULT_CUSTOMIZE.secondaryAction,
     startPage: (["dashboard", "today", "menu", "plan", "log", "workout", "chat"] as StartPage[]).includes(v.startPage as StartPage) ? (v.startPage as StartPage) : DEFAULT_CUSTOMIZE.startPage,

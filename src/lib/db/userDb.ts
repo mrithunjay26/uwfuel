@@ -6,6 +6,8 @@ import {
 } from "firebase/database";
 import { push, remove, set, update } from "@/lib/offline/writes";
 import { PATHS } from "@/lib/db/paths";
+import { mealFoodKey } from "@/lib/planner/tasteKey";
+import type { MealTiming } from "@/lib/planner/mealTiming";
 import type {
   ActivePlan,
   ActiveWorkoutPlan,
@@ -16,6 +18,10 @@ import type {
   InventoryFood,
   KitchenProfile,
   MealPlan,
+  MealRating,
+  MealRatingValue,
+  TasteEvent,
+  TasteEventKind,
   PantryItem,
   OnboardingProfile,
   ReadinessCheck,
@@ -293,6 +299,60 @@ export async function deletePlanFromRepo(
   planId: string,
 ): Promise<void> {
   await remove(ref(db, PATHS.planEntry(uid, dateKey, planId)));
+}
+
+export async function setMealRating(
+  db: Database,
+  uid: string,
+  food: { name: string; location_id?: string; location_name?: string },
+  rating: MealRatingValue,
+): Promise<void> {
+  const key = mealFoodKey(food.name);
+  const existing = await get(ref(db, PATHS.mealRating(uid, key)));
+  const prev = existing.exists() ? (existing.val() as MealRating) : null;
+  const payload: MealRating = {
+    key,
+    name: food.name,
+    location_id: food.location_id ?? prev?.location_id ?? "",
+    location_name: food.location_name ?? prev?.location_name ?? "",
+    rating,
+    count: (prev?.count ?? 0) + 1,
+    updated_at: Date.now(),
+  };
+  await set(ref(db, PATHS.mealRating(uid, key)), payload);
+}
+
+export async function clearMealRating(db: Database, uid: string, name: string): Promise<void> {
+  await remove(ref(db, PATHS.mealRating(uid, mealFoodKey(name))));
+}
+
+const TASTE_EVENT_CAP = 200;
+
+export async function logTasteEvent(
+  db: Database,
+  uid: string,
+  event: { name: string; location_id?: string; kind: TasteEventKind },
+): Promise<void> {
+  const payload: TasteEvent = {
+    key: mealFoodKey(event.name),
+    name: event.name,
+    location_id: event.location_id ?? "",
+    kind: event.kind,
+    at: Date.now(),
+  };
+  await push(ref(db, PATHS.tasteEvents(uid)), payload);
+  const snap = await get(ref(db, PATHS.tasteEvents(uid)));
+  if (!snap.exists()) return;
+  const entries = Object.entries(snap.val() as Record<string, TasteEvent>);
+  if (entries.length <= TASTE_EVENT_CAP) return;
+  const stale = entries
+    .sort((a, b) => (a[1].at ?? 0) - (b[1].at ?? 0))
+    .slice(0, entries.length - TASTE_EVENT_CAP);
+  await Promise.all(stale.map(([id]) => remove(ref(db, `${PATHS.tasteEvents(uid)}/${id}`)).catch(() => {})));
+}
+
+export async function writeMealTiming(db: Database, uid: string, timing: MealTiming): Promise<void> {
+  await set(ref(db, PATHS.mealTiming(uid)), timing);
 }
 
 export function newPlanId(db: Database, uid: string, dateKey: string): string {

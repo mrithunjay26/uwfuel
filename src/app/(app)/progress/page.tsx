@@ -5,6 +5,10 @@ import { Activity, Check, Flame, Pencil, Trash2, Utensils, X, Zap } from "lucide
 import { useWeightLog } from "@/lib/hooks/useWeightLog";
 import { useAllLogs } from "@/lib/hooks/useAllLogs";
 import { useFoodLog, type FoodLogItem } from "@/lib/hooks/useFoodLog";
+import { useMealPrefs } from "@/lib/hooks/useMealPrefs";
+import { mealFoodKey } from "@/lib/planner/tasteKey";
+import { MealRatePills } from "@/components/app/MealRatePills";
+import type { MealRatingValue } from "@/lib/db/types";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { saveWeight, deleteLogEntry, updateLogEntry } from "@/lib/db/userDb";
@@ -14,6 +18,8 @@ import { todayPacificKey } from "@/lib/firebase/dining";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { GoalTracker } from "@/components/app/GoalTracker";
 import { LoggedFoodSheet } from "@/components/app/LoggedFoodSheet";
+import { InteractiveChart, type ChartPoint } from "@/components/app/InteractiveChart";
+import { DayDetailPanel } from "@/components/app/DayDetailPanel";
 
 type Range = "7d" | "30d" | "90d" | "all";
 
@@ -29,85 +35,6 @@ function daysForRange(range: Range): number {
   if (range === "30d") return 30;
   if (range === "90d") return 90;
   return 9999;
-}
-
-interface SparklineProps {
-  data: number[];
-  width?: number;
-  height?: number;
-  color?: string;
-  filled?: boolean;
-}
-
-function Sparkline({ data, width = 300, height = 60, color = "var(--color-accent)", filled = false }: SparklineProps) {
-  if (data.length < 2) return null;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = max - min || 1;
-  const pad = 4;
-  const w = width - pad * 2;
-  const h = height - pad * 2;
-
-  const pts = data.map((v, i) => ({
-    x: pad + (i / (data.length - 1)) * w,
-    y: pad + h - ((v - min) / range) * h,
-  }));
-
-  const pathD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const fillD = `${pathD} L ${pts[pts.length - 1].x.toFixed(1)} ${(pad + h).toFixed(1)} L ${pts[0].x.toFixed(1)} ${(pad + h).toFixed(1)} Z`;
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}>
-      {filled && (
-        <path d={fillD} fill={color} fillOpacity={0.12} />
-      )}
-      <path d={pathD} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r={3} fill={color} />
-    </svg>
-  );
-}
-
-interface BarChartProps {
-  data: Array<{ label: string; value: number; color?: string }>;
-  target?: number;
-  height?: number;
-}
-
-function BarChart({ data, target, height = 100 }: BarChartProps) {
-  if (data.length === 0) return null;
-  const max = Math.max(...data.map((d) => d.value), target ?? 0, 1);
-  const barW = 100 / data.length;
-
-  return (
-    <svg viewBox={`0 0 100 ${height}`} className="w-full" preserveAspectRatio="none" style={{ height }}>
-      {target != null && (
-        <line
-          x1={0} y1={height - (target / max) * height}
-          x2={100} y2={height - (target / max) * height}
-          stroke="var(--color-danger)"
-          strokeWidth={0.5}
-          strokeDasharray="2 2"
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {data.map((d, i) => {
-        const barH = (d.value / max) * height;
-        const x = i * barW + barW * 0.1;
-        const w = barW * 0.8;
-        const color = d.color || "var(--color-accent)";
-        return (
-          <rect
-            key={i}
-            x={x} y={height - barH}
-            width={w} height={barH}
-            fill={color}
-            fillOpacity={0.8}
-            rx={1}
-          />
-        );
-      })}
-    </svg>
-  );
 }
 
 function WeightInput({ onSave }: { onSave: (w: number) => Promise<void> }) {
@@ -206,10 +133,12 @@ export default function ProgressPage() {
   const handle = useUserDb();
   const { profile } = useUserProfile();
   const { points: weightPoints, latest: latestWeight } = useWeightLog();
-  const { days: logDays, loading: logsLoading } = useAllLogs();
+  const { days: logDays, byDay, loading: logsLoading } = useAllLogs();
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [range, setRange] = useState<Range>("30d");
   const today = todayPacificKey();
   const { entries: todayEntries } = useFoodLog(today);
+  const { ratings: mealRatings } = useMealPrefs();
   const [foodDetail, setFoodDetail] = useState<FoodLogItem | null>(null);
 
   async function handleDeleteFood(id: string) {
@@ -314,10 +243,16 @@ export default function ProgressPage() {
     await saveWeight(handle.db, handle.uid, today, w);
   }
 
-  const calData = filteredDays.map((d) => d.calories);
   const proteinData = filteredDays.map((d) => d.protein);
   const costData = filteredDays.map((d) => d.cost);
   const weightData = filteredWeightPts.map((p) => p.weight);
+
+  const calSeries: ChartPoint[] = filteredDays.map((d) => ({ dateKey: d.dateKey, value: d.calories }));
+  const proteinSeries: ChartPoint[] = filteredDays.map((d) => ({ dateKey: d.dateKey, value: d.protein }));
+  const costSeries: ChartPoint[] = filteredDays.map((d) => ({ dateKey: d.dateKey, value: d.cost }));
+  const weightSeries: ChartPoint[] = filteredWeightPts.map((p) => ({ dateKey: p.dateKey, value: p.weight }));
+  const barSeries: ChartPoint[] = filteredDays.slice(-14).map((d) => ({ dateKey: d.dateKey, value: d.calories }));
+  const weightByDate: Record<string, number> = Object.fromEntries(weightPoints.map((p) => [p.dateKey, p.weight]));
 
   const barData = filteredDays.slice(-14).map((d) => ({
     label: d.dateKey.slice(5),
@@ -409,6 +344,7 @@ export default function ProgressPage() {
                   <FoodLogRow
                     key={e.id}
                     entry={e}
+                    rating={mealRatings[mealFoodKey(e.name)]?.rating}
                     onDelete={handleDeleteFood}
                     onUpdate={handleUpdateFood}
                     onOpen={setFoodDetail}
@@ -436,6 +372,16 @@ export default function ProgressPage() {
           />
         </div>
 
+        {selectedDate && (
+          <DayDetailPanel
+            dateKey={selectedDate}
+            stats={byDay[selectedDate]}
+            weight={weightByDate[selectedDate] ?? null}
+            targetKcal={targetKcal}
+            onClose={() => setSelectedDate(null)}
+          />
+        )}
+
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display text-[16px] font-extrabold text-ink">Weight</h2>
@@ -453,7 +399,7 @@ export default function ProgressPage() {
 
           <div className="glass-panel rounded-[20px] p-4">
             {weightData.length >= 2 ? (
-              <Sparkline data={weightData} height={80} color="var(--color-protein)" filled />
+              <InteractiveChart points={weightSeries} height={80} color="var(--color-protein)" selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `${v} lbs`} />
             ) : (
               <p className="py-4 text-center text-[13px] text-ink-faint">Log weight below to see your trend</p>
             )}
@@ -503,8 +449,8 @@ export default function ProgressPage() {
               <h2 className="font-display text-[16px] font-extrabold text-ink">Calorie Trend</h2>
               <span className="text-[12px] text-ink-faint">{filteredDays.length} days</span>
             </div>
-            <div className="glass-panel rounded-[20px] p-4">
-              <Sparkline data={calData} height={70} color="var(--color-accent)" filled />
+            <div data-tour="progress-chart" className="glass-panel rounded-[20px] p-4">
+              <InteractiveChart points={calSeries} height={70} color="var(--color-accent)" target={targetKcal} selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `${Math.round(v)} kcal`} />
               {filteredDays.length >= 2 && (
                 <div className="mt-1 flex justify-between">
                   <span className="text-[10px] text-ink-faint">{filteredDays[0].dateKey.slice(5)}</span>
@@ -526,7 +472,7 @@ export default function ProgressPage() {
               </div>
             </div>
             <div className="glass-panel rounded-[20px] p-4">
-              <BarChart data={barData} target={targetKcal} height={100} />
+              <InteractiveChart points={barSeries} type="bar" height={100} color="var(--color-accent)" target={targetKcal} selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `${Math.round(v)} kcal`} />
               <div className="mt-2 flex justify-between">
                 <span className="text-[10px] text-ink-faint">{barData[0]?.label}</span>
                 <span className="text-[10px] text-ink-faint">Target: {targetKcal}</span>
@@ -540,7 +486,7 @@ export default function ProgressPage() {
           <section>
             <h2 className="mb-3 font-display text-[16px] font-extrabold text-ink">Protein Trend</h2>
             <div className="glass-panel rounded-[20px] p-4">
-              <Sparkline data={proteinData} height={60} color="var(--color-protein)" />
+              <InteractiveChart points={proteinSeries} height={60} color="var(--color-protein)" target={proteinTarget} selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `${Math.round(v)}g`} />
               <p className="mt-2 text-[12px] text-ink-soft">
                 avg <b className="font-semibold text-ink">{avg.protein}g</b> · target <b className="font-semibold text-ink">{proteinTarget}g</b>
               </p>
@@ -566,7 +512,7 @@ export default function ProgressPage() {
               </div>
             </div>
             <div className="mt-3 glass-panel rounded-[20px] p-4">
-              <Sparkline data={costData} height={50} color="var(--color-carbs)" />
+              <InteractiveChart points={costSeries} height={50} color="var(--color-carbs)" selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `$${v.toFixed(2)}`} />
             </div>
           </section>
         )}
@@ -654,11 +600,13 @@ function BodyCompositionBars({
 
 function FoodLogRow({
   entry,
+  rating,
   onDelete,
   onUpdate,
   onOpen,
 }: {
   entry: FoodLogItem;
+  rating?: MealRatingValue;
   onDelete: (id: string) => void;
   onUpdate: (id: string, patch: Partial<FoodLogItem>) => void;
   onOpen?: (entry: FoodLogItem) => void;
@@ -730,7 +678,8 @@ function FoodLogRow({
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-[14px] bg-surface-2/70 px-3 py-2.5">
+    <div className="rounded-[14px] bg-surface-2/70 px-3 py-2.5">
+      <div className="flex items-center gap-2">
       <button
         onClick={() => onOpen?.(entry)}
         className="press flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -761,6 +710,16 @@ function FoodLogRow({
       >
         <Trash2 className="size-3.5" />
       </button>
+      </div>
+      {!entry.is_custom && entry.name ? (
+        <MealRatePills
+          name={entry.name}
+          locationId={entry.location_id}
+          locationName={entry.location_name}
+          rating={rating}
+          className="mt-2 pl-10"
+        />
+      ) : null}
     </div>
   );
 }

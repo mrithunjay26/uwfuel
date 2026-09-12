@@ -84,7 +84,11 @@ function sameStop(a: DraftStop, b: DraftStop): boolean {
     && a.start_time === b.start_time;
 }
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function ClassScheduleModal({ open, initial, onClose }: ClassScheduleModalProps) {
+  const drag = useSheetDrag(onClose);
   const handle = useUserDb();
   const { places: savedPlaces } = useSavedPlaces();
 
@@ -290,9 +294,9 @@ export function ClassScheduleModal({ open, initial, onClose }: ClassScheduleModa
         aria-modal="true"
         aria-label="Class schedule"
         className="glass-strong animate-rise fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[480px] rounded-t-[28px] px-5 pb-[max(env(safe-area-inset-bottom),24px)] pt-5"
-        style={{ maxHeight: "94dvh", display: "flex", flexDirection: "column" }}
+        style={{ maxHeight: "94dvh", display: "flex", flexDirection: "column", ...drag.sheetStyle }}
       >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line-strong" />
+        <DragHandle handleProps={drag.handleProps} className="mb-1.5" />
 
         <div className="flex items-center justify-between">
           <div>

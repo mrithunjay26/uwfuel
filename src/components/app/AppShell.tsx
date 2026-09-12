@@ -21,13 +21,15 @@ import type { FabShape, NavSize, QuickAction } from "@/lib/customize/types";
 import { AuroraField } from "@/components/app/AuroraField";
 import { InstallBanner } from "@/components/app/InstallBanner";
 import { SyncStatus } from "@/components/app/SyncStatus";
+import { TutorialProvider } from "@/lib/tutorial/TutorialContext";
+import { TutorialOverlay } from "@/components/app/TutorialOverlay";
 
 interface Tab { href: string; label: string; icon: LucideIcon }
 
-const NAV_SIZES: Record<NavSize, { icon: number; item: number; label: string; fab: number }> = {
-  compact: { icon: 17, item: 44, label: "text-[8px]", fab: 46 },
-  default: { icon: 19, item: 50, label: "text-[9px]", fab: 52 },
-  large:   { icon: 22, item: 56, label: "text-[10px]", fab: 60 },
+const NAV_SIZES: Record<NavSize, { icon: number; item: number; label: string; fab: number; pad: number }> = {
+  compact: { icon: 19, item: 50, label: "text-[9px]",  fab: 52, pad: 84 },
+  default: { icon: 22, item: 58, label: "text-[10px]", fab: 60, pad: 94 },
+  large:   { icon: 25, item: 66, label: "text-[11px]", fab: 70, pad: 104 },
 };
 
 const FAB_RADIUS: Record<FabShape, string> = {
@@ -75,10 +77,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isActive = (href: string) => isRouteActive(pathname, href);
 
   return (
+    <TutorialProvider>
     <div className={`relative mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col ${workoutOled ? "workout-oled" : ""}`}>
       {!workoutOled && <AuroraField />}
+      <TutorialOverlay />
 
-      <div className={`flex-1 ${navTop ? "pt-[calc(74px+env(safe-area-inset-top))]" : "pb-[calc(80px+env(safe-area-inset-bottom))]"}`}>
+      <div
+        className="flex-1"
+        style={navTop
+          ? { paddingTop: `calc(${dims.pad}px + env(safe-area-inset-top))` }
+          : { paddingBottom: `calc(${dims.pad}px + env(safe-area-inset-bottom))` }}
+      >
         <div key={pathname} className="page-anim">{children}</div>
       </div>
 
@@ -97,7 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <SecondaryIcon className="size-[18px]" />
             </Link>
           )}
-          <div className="glass-nav relative flex items-center rounded-[26px] px-1.5 py-2">
+          <div className="glass-nav relative flex items-center gap-0.5 rounded-[26px] px-2 py-2.5">
             <div className="flex min-w-0 flex-1 items-center justify-around">
               {leftTabs.map((t) => (
                 <NavItem key={t.href} {...t} active={isActive(t.href)} dims={dims} showLabel={customize.navLabels} />
@@ -130,6 +139,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
     </div>
+    </TutorialProvider>
   );
 }
 
@@ -157,12 +167,13 @@ function NavItem({
       href={href}
       onClick={() => haptic("light")}
       aria-label={label}
+      data-tour={`nav-${href.slice(1)}`}
       className={cn(
-        "press relative flex min-w-0 flex-1 flex-col items-center gap-0.5 py-1 font-semibold transition",
+        "press relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-1.5 font-semibold transition",
         dims.label,
         active ? "text-accent" : "text-ink-faint",
       )}
-      style={{ maxWidth: dims.item }}
+      style={{ maxWidth: dims.item + 10, minHeight: dims.item }}
     >
       {active && (
         <span className="absolute -top-0.5 h-1 w-1 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />

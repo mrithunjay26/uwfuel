@@ -9,6 +9,9 @@ import type { InventoryFood } from "@/lib/db/types";
 import { haptic } from "@/lib/utils/haptics";
 import { Portal } from "@/components/ui/Portal";
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function FoodInventorySheet({
   open, onClose, onLog, dateLabel,
 }: {
@@ -17,6 +20,7 @@ export function FoodInventorySheet({
   onLog: (food: InventoryFood) => void;
   dateLabel: string;
 }) {
+  const drag = useSheetDrag(onClose);
   const handle = useUserDb();
   const { items } = useFoodInventory();
   const [adding, setAdding] = useState(false);
@@ -77,7 +81,8 @@ export function FoodInventorySheet({
     <div className="fixed inset-0 z-[70] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
 
-      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg shadow-[var(--shadow-lg)]">
+      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg shadow-[var(--shadow-lg)]" style={drag.sheetStyle}>
+        <DragHandle handleProps={drag.handleProps} />
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div className="flex items-center gap-2">
             <Boxes className="size-[18px] text-accent" />

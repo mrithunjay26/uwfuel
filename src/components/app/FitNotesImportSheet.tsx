@@ -10,7 +10,11 @@ import { haptic } from "@/lib/utils/haptics";
 
 type Phase = "pick" | "preview" | "importing" | "done";
 
+import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
+import { DragHandle } from "@/components/ui/DragHandle";
+
 export function FitNotesImportSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const drag = useSheetDrag(onClose);
   const handle = useUserDb();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [phase, setPhase] = useState<Phase>("pick");
@@ -67,7 +71,8 @@ export function FitNotesImportSheet({ open, onClose }: { open: boolean; onClose:
     <Portal>
     <div className="fixed inset-0 z-[75] flex flex-col">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={close} />
-      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]">
+      <div className="animate-rise relative mt-auto flex max-h-[92dvh] flex-col rounded-t-[26px] border-t border-line bg-bg px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-5 shadow-[var(--shadow-lg)]" style={drag.sheetStyle}>
+        <DragHandle handleProps={drag.handleProps} />
         <div className="flex items-center justify-between">
           <h2 className="font-display text-[17px] font-extrabold text-ink">Import from FitNotes</h2>
           <button onClick={close} aria-label="Close" className="grid size-9 place-items-center rounded-full text-ink-soft"><X className="size-5" /></button>

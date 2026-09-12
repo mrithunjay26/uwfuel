@@ -1,4 +1,4 @@
-const CACHE = "uwfuel-v4";
+const CACHE = "uwfuel-v5";
 const TILE_CACHE = "uwfuel-tiles-v1";
 const TILE_LIMIT = 600;
 
@@ -141,6 +141,57 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
+const reminderTimers = new Map();
+
+function showReminder(r) {
+  self.registration.showNotification(r.title || "Reminder", {
+    body: r.body || "",
+    icon: "/icons/icon-192x192.png",
+    badge: "/icons/icon-72x72.png",
+    tag: r.id,
+    data: { url: r.url || "/today" },
+    vibrate: [200, 100, 200],
+    actions: [{ action: "view", title: "Open" }],
+  }).catch(() => {});
+}
+
+function clearReminder(id) {
+  const entry = reminderTimers.get(id);
+  if (entry) {
+    clearTimeout(entry.timeout);
+    reminderTimers.delete(id);
+  }
+}
+
+function armReminder(r) {
+  const delay = r.fireAt - Date.now();
+  if (delay < 0) return;
+  const timeout = setTimeout(() => {
+    reminderTimers.delete(r.id);
+    showReminder(r);
+  }, delay);
+  reminderTimers.set(r.id, { timeout, fireAt: r.fireAt });
+}
+
+function syncReminders(list) {
+  const incoming = new Map((list || []).map((r) => [r.id, r]));
+  for (const [id, entry] of reminderTimers) {
+    const next = incoming.get(id);
+    if (!next || next.fireAt !== entry.fireAt) clearReminder(id);
+  }
+  for (const r of list || []) {
+    if (reminderTimers.has(r.id)) continue;
+    armReminder(r);
+  }
+}
+
+function cancelAllReminders() {
+  for (const id of Array.from(reminderTimers.keys())) clearReminder(id);
+  self.registration.getNotifications().then((ns) => {
+    ns.forEach((n) => { if (n.tag && n.data && n.data.url) n.close(); });
+  }).catch(() => {});
+}
+
 self.addEventListener("message", (event) => {
   if (!event.data) return;
   const { type, payload } = event.data;
@@ -150,24 +201,23 @@ self.addEventListener("message", (event) => {
     return;
   }
 
-  if (type === "SCHEDULE_MEAL_REMINDER") {
-    const { title, body, delayMs, tag, url } = payload;
-    setTimeout(() => {
-      self.registration.showNotification(title || "Meal time!", {
-        body: body || "Your next meal is coming up.",
-        icon: "/icons/icon-192x192.png",
-        badge: "/icons/icon-72x72.png",
-        tag: tag || "meal-reminder",
-        data: { url: url || "/menu" },
-        vibrate: [200, 100, 200],
-        actions: [{ action: "view", title: "See menu" }],
-      }).catch(() => {});
-    }, Math.max(0, delayMs || 0));
+  if (type === "SYNC_REMINDERS") {
+    syncReminders((payload && payload.reminders) || []);
+    return;
   }
 
-  if (type === "CANCEL_MEAL_REMINDERS") {
-    self.registration.getNotifications({ tag: "meal-reminder" }).then((notifications) => {
-      notifications.forEach((n) => n.close());
-    });
+  if (type === "CANCEL_ALL_REMINDERS") {
+    cancelAllReminders();
+    return;
+  }
+
+  if (type === "TEST_NOTIFICATION") {
+    setTimeout(() => showReminder({
+      id: "reminder-test",
+      title: (payload && payload.title) || "Reminders on",
+      body: (payload && payload.body) || "You will get one nudge 30 minutes before each item in My Day.",
+      url: "/today",
+    }), 500);
+    return;
   }
 });
