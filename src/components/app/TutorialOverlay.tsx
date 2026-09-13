@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { Portal } from "@/components/ui/Portal";
@@ -63,6 +63,12 @@ export function TutorialOverlay() {
     };
   }, [active, step]);
 
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [cardH, setCardH] = useState(220);
+  useLayoutEffect(() => {
+    if (cardRef.current) setCardH(cardRef.current.offsetHeight);
+  });
+
   if (!active || !step) return null;
 
   const hasSpot = ready && rect != null;
@@ -78,22 +84,31 @@ export function TutorialOverlay() {
       }
     : null;
 
-  const below = spot ? spot.top + spot.height + 14 : 0;
-  const placeBelow = spot ? spot.top + spot.height / 2 < vh * 0.5 : true;
-  const cardTop = spot ? (placeBelow ? below : undefined) : undefined;
-  const cardBottom = spot && !placeBelow ? vh - spot.top + 14 : undefined;
-  const cardLeft = spot ? Math.min(Math.max(12, spot.left), Math.max(12, vw - 332)) : undefined;
+  const MARGIN = 12;
+  const cardW = Math.min(320, vw - MARGIN * 2);
+  const cardMaxH = vh - MARGIN * 2;
+  const cardLeft = spot
+    ? Math.min(Math.max(MARGIN, spot.left), Math.max(MARGIN, vw - cardW - MARGIN))
+    : Math.max(MARGIN, (vw - cardW) / 2);
+  let cardTop: number;
+  if (spot) {
+    const belowTop = spot.top + spot.height + 12;
+    const aboveTop = spot.top - cardH - 12;
+    if (belowTop + cardH <= vh - MARGIN) cardTop = belowTop;
+    else if (aboveTop >= MARGIN) cardTop = aboveTop;
+    else cardTop = (vh - Math.min(cardH, cardMaxH)) / 2;
+  } else {
+    cardTop = (vh - Math.min(cardH, cardMaxH)) / 2;
+  }
+  cardTop = Math.max(MARGIN, Math.min(cardTop, vh - Math.min(cardH, cardMaxH) - MARGIN));
 
   const isLast = index === total - 1;
 
   const card = (
     <div
-      className="animate-rise pointer-events-auto absolute w-[min(320px,calc(100vw-24px))] rounded-[18px] border border-line bg-bg p-4 shadow-[var(--shadow-lg)]"
-      style={
-        spot
-          ? { top: cardTop, bottom: cardBottom, left: cardLeft }
-          : { top: "50%", left: "50%", transform: "translate(-50%,-50%)" }
-      }
+      ref={cardRef}
+      className="animate-rise thin-scrollbar pointer-events-auto absolute overflow-y-auto rounded-[18px] border border-line bg-bg p-4 shadow-[var(--shadow-lg)]"
+      style={{ top: cardTop, left: cardLeft, width: cardW, maxHeight: cardMaxH }}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="font-display text-[15px] font-extrabold text-ink">{step.title}</p>

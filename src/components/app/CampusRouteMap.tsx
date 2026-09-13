@@ -7,6 +7,7 @@ import type { DayEvent } from "@/lib/schedule/dayPlan";
 import type { GeoPosition } from "@/lib/hooks/useGeolocation";
 import { CAMPUS_CENTER } from "@/lib/campus/buildings";
 import { tileConfig } from "@/lib/map/tiles";
+import { diningStatus } from "@/lib/dining/status";
 
 const KIND_COLOR: Record<string, string> = {
   class: "#6c5cf2",
@@ -43,12 +44,14 @@ interface CampusRouteMapProps {
   focusActive?: boolean;
   padTop?: number;
   padBottom?: number;
+  hoursByLabel?: Record<string, string>;
 }
 
 export function CampusRouteMap({
   stops,
   activeIndex,
   user,
+  hoursByLabel,
   routeCoords,
   follow = true,
   className,
@@ -134,6 +137,10 @@ export function CampusRouteMap({
 
       const located = stops.filter((s) => s.place);
       const fanned = fanOutOffsets(located.map((s) => s.place));
+      const nowParts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "numeric", hour12: false })
+        .formatToParts(new Date())
+        .reduce<Record<string, string>>((acc, p) => { if (p.type !== "literal") acc[p.type] = p.value; return acc; }, {});
+      const nowMin = (parseInt(nowParts.hour ?? "0", 10) || 0) * 60 + (parseInt(nowParts.minute ?? "0", 10) || 0);
       located.forEach((stop, i) => {
         const place = stop.place!;
         const spread = fanned.get(i);
@@ -159,10 +166,16 @@ export function CampusRouteMap({
 
         const marker = L.marker([markerLat, markerLng], { icon, zIndexOffset: isActive ? 500 : 0 })
           .bindPopup(
-            `<div style="font-family:system-ui,sans-serif;min-width:150px">
-              <div style="font-weight:800;font-size:13px">${stop.title}</div>
-              <div style="font-size:11px;color:#6b6880;margin-top:2px">${place.label}</div>
-            </div>`,
+            (() => {
+              const st = diningStatus(hoursByLabel?.[place.label.toLowerCase()], nowMin);
+              const color = st.state === "open" ? "#16a34a" : st.state === "closing_soon" ? "#e0883f" : "#dc2626";
+              const statusLine = st.state === "unknown" ? "" : `<div style="font-size:11px;font-weight:700;color:${color};margin-top:3px">${st.label}</div>`;
+              return `<div style="font-family:system-ui,sans-serif;min-width:150px">
+                <div style="font-weight:800;font-size:13px">${stop.title}</div>
+                <div style="font-size:11px;color:#6b6880;margin-top:2px">${place.label}</div>
+                ${statusLine}
+              </div>`;
+            })(),
             { offset: [0, -8] },
           )
           .addTo(layer);
@@ -184,7 +197,7 @@ export function CampusRouteMap({
     })();
 
     return () => { cancelled = true; };
-  }, [ready, stops, stopsSig, activeIndex, focusActive]);
+  }, [ready, stops, stopsSig, activeIndex, focusActive, hoursByLabel]);
 
   useEffect(() => {
     const layer = routeLayerRef.current;

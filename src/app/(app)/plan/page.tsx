@@ -47,6 +47,7 @@ import { substituteOptions } from "@/lib/planner/substitute";
 import { mealFoodKey }      from "@/lib/planner/tasteKey";
 import { useMealTiming }   from "@/lib/hooks/useMealTiming";
 import { minutesToClock, clockToMinutes, MEAL_TIMING_TYPES, type MealTiming } from "@/lib/planner/mealTiming";
+import { isOpenAt } from "@/lib/dining/status";
 import { usePlanRepo }     from "@/lib/hooks/usePlanRepo";
 import {
   useGeolocation,
@@ -441,19 +442,19 @@ export default function PlanPage() {
 
   const plannerPool = useMemo<PlannerItem[]>(
     () => eligibleMenuItems
-      .filter((i) => i.price > 0 && i.price <= budget && isSubstantialFood(i))
+      .filter((i) => i.price > 0 && i.price <= budget && isSubstantialFood(i) && !prefs.blocked({ name: i.name }))
       .sort((a, b) => scoreMenuItem(b, phase, budget) - scoreMenuItem(a, phase, budget))
       .map(toPlannerItem),
-    [eligibleMenuItems, budget, phase],
+    [eligibleMenuItems, budget, phase, prefs],
   );
 
   const plannerExtras = useMemo<PlannerItem[]>(() => {
     const sides = eligibleMenuItems
-      .filter((i) => i.price > 0 && i.price <= budget && i.calories >= 80 && !isSubstantialFood(i))
+      .filter((i) => i.price > 0 && i.price <= budget && i.calories >= 80 && !isSubstantialFood(i) && !prefs.blocked({ name: i.name }))
       .sort((a, b) => b.calories - a.calories)
       .map(toPlannerItem);
     const owned = savedFoods
-      .filter((f) => f.calories > 0)
+      .filter((f) => f.calories > 0 && !prefs.blocked({ name: f.name }))
       .map((f) => ({
         key: `saved-${f.id}`,
         name: f.name,
@@ -464,7 +465,7 @@ export default function PlanPage() {
         price: f.price ?? 0,
       }));
     return [...owned, ...sides];
-  }, [eligibleMenuItems, budget, savedFoods]);
+  }, [eligibleMenuItems, budget, savedFoods, prefs]);
 
   const nearbySpotsFor = useCallback(
     (slot: PlannerSlot) => {
@@ -895,7 +896,7 @@ export default function PlanPage() {
 3. The SUM of the chosen items' prices MUST be UNDER $${budgetStr}. Pick cheaper real items so the total fits.
 4. Return exactly ${mealCount} meals — choose cheaper real items so all ${mealCount} fit under $${budgetStr}. Only return fewer if even the cheapest items can't fit.
 5. CALORIES MATTER MOST. The day must add up to about ${targetKcal} kcal. Pick the biggest plates that still fit the budget. Coming in 500+ kcal short is a failed plan.
-6. Put each meal at or near the spots listed for its time slot so the student isn't crossing campus between classes.
+6. Put each meal at or near the spots listed for its time slot so the student isn't crossing campus between classes. Only pick spots that are open at that meal's time.
 ━━━━━━━━━━━━━━━━━
 
 Respond ONLY with valid JSON (no markdown, no extra text). Keep it short — nutrition and prices
@@ -934,6 +935,13 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
     ];
   }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest, prefs, locations]);
 
+  const isLocationOpen = (locationId: string, minute: number): boolean => {
+    if (locationId === ANYWHERE_LOCATION) return true;
+    const loc = locations?.[locationId];
+    if (!loc) return true;
+    return isOpenAt(loc.closes_at, minute) !== false;
+  };
+
   function buildPlan(picks: PlannerPick[]): { meals: PlanMeal[]; notes: string[] } {
     return fitDay({
       slots: planSlots,
@@ -944,6 +952,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
       targetKcal,
       picks,
       bias: (item) => prefs.bias({ name: item.name, location_id: item.location_id }),
+      isLocationOpen,
     });
   }
 

@@ -36,6 +36,16 @@ export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailS
     { label: "Fat", value: Math.round(fat).toString(), unit: fatEstimated ? "g*" : "g", color: "text-fat" },
   ];
 
+  const descText = (item.description ?? "").trim();
+  const ingText = item.ingredients.join(", ").trim();
+  const normStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const duplicateText = Boolean(descText && ingText && (
+    normStr(descText) === normStr(ingText) ||
+    normStr(descText).includes(normStr(ingText)) ||
+    normStr(ingText).includes(normStr(descText))
+  ));
+  const showDescription = Boolean(descText) && !duplicateText;
+
   return createPortal(
     <>
       <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
@@ -100,7 +110,7 @@ export function MealDetailSheet({ item, onClose, onLog, isLogging }: MealDetailS
             <p className="mt-1.5 text-[10px] text-ink-faint">* carbs / fat estimated from calories &amp; protein</p>
           )}
 
-          {item.description && (
+          {showDescription && (
             <div className="mt-4">
               <p className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Description</p>
               <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">{item.description}</p>

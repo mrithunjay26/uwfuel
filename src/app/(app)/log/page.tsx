@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
+import { InteractiveChart, type ChartPoint } from "@/components/app/InteractiveChart";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useWorkoutLogs } from "@/lib/hooks/useWorkoutLogs";
 import { useFirebaseExercises } from "@/lib/hooks/useFirebaseExercises";
@@ -50,6 +51,12 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const CHART_COLORS = ["#22c55e", "#d946ef", "#ef4444", "#3b82f6", "#f59e0b", "#8b7cf6", "#14b8a6", "#f472b6", "#a3a3a3"];
 
 function dateKey(y: number, m0: number, d: number) { return `${y}-${pad(m0 + 1)}-${pad(d)}`; }
+function workoutDateLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y) return dateKey;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
 function shiftDate(key: string, delta: number) {
   const [y, m, d] = key.split("-").map(Number);
   const dt = new Date(y, m - 1, d); dt.setDate(dt.getDate() + delta);
@@ -1110,6 +1117,7 @@ type Range = "all" | "year" | "month" | "week";
 
 function ChartsTab({ logs, prIndex, muscleByName, today }: { logs: WorkoutLogItem[]; prIndex: Map<string, PrKind>; muscleByName: Record<string, string>; today: string }) {
   const [range, setRange] = useState<Range>("all");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const cutoff = useMemo(() => {
     if (range === "all") return "0000-00-00";
@@ -1130,6 +1138,12 @@ function ChartsTab({ logs, prIndex, muscleByName, today }: { logs: WorkoutLogIte
   const total = segments.reduce((s, x) => s + x.value, 0);
   const inRange = useMemo(() => logs.filter((l) => l.date >= cutoff), [logs, cutoff]);
   const workoutsInRange = inRange.length;
+
+  const volumeSeries = useMemo<ChartPoint[]>(() => {
+    const byDate: Record<string, number> = {};
+    inRange.forEach((l) => { byDate[l.date] = (byDate[l.date] || 0) + logVolume(l); });
+    return Object.entries(byDate).sort((a, b) => a[0].localeCompare(b[0])).map(([dateKey, value]) => ({ dateKey, value }));
+  }, [inRange]);
 
   const metrics = useMemo(() => {
     let sets = 0, reps = 0;
@@ -1165,6 +1179,35 @@ function ChartsTab({ logs, prIndex, muscleByName, today }: { logs: WorkoutLogIte
           <Stat icon={<Target className="size-3.5" />} label="Top focus" value={metrics.topMuscle} />
         </div>
       </section>
+
+      {volumeSeries.length >= 2 && (
+        <section className="glass-panel rounded-[22px] p-4">
+          <p className="mb-2 flex items-center gap-1.5 font-display text-[15px] font-bold text-ink"><Activity className="size-4 text-accent" /> Volume trend</p>
+          <InteractiveChart points={volumeSeries} height={90} color="var(--color-accent)" selectedKey={selectedDate} onSelect={setSelectedDate} formatValue={(v) => `${bigNum(v)} lb`} />
+          {selectedDate && (() => {
+            const dayLogs = inRange.filter((l) => l.date === selectedDate);
+            if (dayLogs.length === 0) return null;
+            const vol = dayLogs.reduce((s, l) => s + logVolume(l), 0);
+            const prs = countPrs(prIndex, dayLogs.map((l) => l.id));
+            const exNames = dayLogs.flatMap((l) => l.exercises.map((ex) => ex.name));
+            const exCount = dayLogs.reduce((s, l) => s + l.exercises.length, 0);
+            return (
+              <div className="mt-3 rounded-[14px] border border-accent/25 bg-surface-2 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[13px] font-extrabold text-ink">{workoutDateLabel(selectedDate)}</p>
+                  <button onClick={() => setSelectedDate(null)} className="text-[11px] font-bold text-ink-faint">Close</button>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-3 text-[12px] font-semibold text-ink-soft">
+                  <span className="text-flame">{bigNum(vol)} lb volume</span>
+                  <span>{exCount} exercise{exCount === 1 ? "" : "s"}</span>
+                  {prs > 0 && <span className="text-accent-ink">{prs} PR{prs === 1 ? "" : "s"}</span>}
+                </div>
+                {exNames.length > 0 && <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{exNames.join(", ")}</p>}
+              </div>
+            );
+          })()}
+        </section>
+      )}
 
       <section className="glass-panel rounded-[22px] p-4">
         <p className="flex items-center gap-1.5 font-display text-[15px] font-bold text-ink"><BarChart3 className="size-4 text-accent" /> Volume by muscle</p>

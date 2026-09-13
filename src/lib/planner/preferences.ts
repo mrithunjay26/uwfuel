@@ -14,6 +14,7 @@ export interface PreferenceInput {
 
 export interface PreferenceProfile {
   bias(food: FoodLike): number;
+  blocked(food: FoodLike): boolean;
   recentlyEatenNames: string[];
   lovedNames: string[];
   dislikedNames: string[];
@@ -124,6 +125,10 @@ export function buildPreferenceProfile(input: PreferenceInput): PreferenceProfil
     return SPOT_CAP * (n / spotMax);
   }
 
+  function blocked(food: FoodLike): boolean {
+    return ratings[mealFoodKey(food.name)]?.rating === "bad";
+  }
+
   function bias(food: FoodLike): number {
     const key = mealFoodKey(food.name);
     const raw =
@@ -166,5 +171,5 @@ export function buildPreferenceProfile(input: PreferenceInput): PreferenceProfil
     return lines;
   }
 
-  return { bias, recentlyEatenNames, lovedNames, dislikedNames, favoriteSpotIds, promptLines };
+  return { bias, blocked, recentlyEatenNames, lovedNames, dislikedNames, favoriteSpotIds, promptLines };
 }

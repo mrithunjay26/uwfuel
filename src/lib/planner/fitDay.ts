@@ -32,6 +32,7 @@ export interface FitDayInput {
   targetKcal: number;
   picks?: PlannerPick[];
   bias?: (item: PlannerItem) => number;
+  isLocationOpen?: (locationId: string, minute: number) => boolean;
 }
 
 export interface FitDayResult {
@@ -81,6 +82,17 @@ interface Draft {
   reasoning?: string;
 }
 
+function clockToMinute(clock: string): number {
+  const m = /(d{1,2})(?::(d{2}))?s*(AM|PM)?/i.exec((clock || "").trim());
+  if (!m) return 0;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2] || "0", 10);
+  const ap = (m[3] || "").toUpperCase();
+  if (ap === "PM" && h !== 12) h += 12;
+  if (ap === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
 function money(n: number): string {
   return `$${n.toFixed(n % 1 === 0 ? 0 : 2)}`;
 }
@@ -96,6 +108,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
   const rank = new Map<string, number>();
   input.pool.forEach((item, i) => rank.set(item.key, 1 - i / Math.max(1, input.pool.length)));
   const bias = (item: PlannerItem): number => input.bias?.(item) ?? 0;
+  const isOpen = (item: PlannerItem, minute: number): boolean => input.isLocationOpen?.(item.location_id, minute) ?? true;
 
   const shares = slots.map((s) => TYPE_SHARE[s.type] ?? 0.2);
   const shareSum = shares.reduce((a, b) => a + b, 0) || 1;
@@ -147,6 +160,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
   const drafts: Draft[] = [];
   slots.forEach((slot, i) => {
     const want = slotKcal[i];
+    const slotMinute = clockToMinute(slot.time);
     let main: PlannerItem | null = null;
     let reasoning: string | undefined;
     let time = slot.time;
@@ -155,7 +169,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
     while (queue.length > 0 && !main) {
       const pick = queue.shift() as PlannerPick;
       const item = byKey.get(pick.key);
-      if (item && !used.has(item.key)) {
+      if (item && !used.has(item.key) && isOpen(item, slotMinute)) {
         main = item;
         reasoning = pick.reasoning;
         if (pick.time) time = pick.time;
@@ -166,7 +180,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
       main = bestOf(
         input.pool,
         (item) => (rank.get(item.key) ?? 0) * 1.4 + nearness(item, slot.near) * 2 + calorieFit(item.calories, want) * 1.6 + bias(item) * BIAS_WEIGHT,
-        (item) => item.price <= budget,
+        (item) => item.price <= budget && isOpen(item, slotMinute),
       );
     }
 
@@ -199,8 +213,8 @@ export function fitDay(input: FitDayInput): FitDayResult {
       bestOf(
         input.pool,
         (item) => (rank.get(item.key) ?? 0) * 1.2 + nearness(item, d.near) * 2 + calorieFit(item.calories, d.kcalTarget) * 1.6,
-        (item) => item.price <= room,
-      ) ?? bestOf(input.pool, (item) => -item.price, (item) => item.price < d.main.price);
+        (item) => item.price <= room && isOpen(item, clockToMinute(d.time)),
+      ) ?? bestOf(input.pool, (item) => -item.price, (item) => item.price < d.main.price && isOpen(item, clockToMinute(d.time)));
 
     if (swap) {
       used.delete(d.main.key);
@@ -246,7 +260,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
     for (const d of drafts) {
       const roomFor = room + d.main.price;
       for (const item of input.pool) {
-        if (used.has(item.key) || item.price > roomFor || item.calories <= d.main.calories) continue;
+        if (used.has(item.key) || item.price > roomFor || item.calories <= d.main.calories || !isOpen(item, clockToMinute(d.time))) continue;
         const score = (item.calories - d.main.calories) * (0.6 + nearness(item, d.near) * 0.6);
         if (!bestUpgrade || score > bestUpgrade.score) bestUpgrade = { draft: d, item, score };
       }

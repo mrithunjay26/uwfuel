@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { diningStatus } from "@/lib/dining/status";
 import type { LocationGroup, FlatMenuItem } from "@/lib/menu/flattenMenu";
 import { tileConfig } from "@/lib/map/tiles";
 
@@ -64,15 +65,23 @@ export function DiningMap({
         L.tileLayer(tiles.url, { attribution: tiles.attribution, maxZoom: tiles.maxZoom }).addTo(map);
         if (zoomControl) L.control.zoom({ position: "bottomright" }).addTo(map);
 
+        const now = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "numeric", hour12: false })
+          .formatToParts(new Date())
+          .reduce<Record<string, string>>((acc, p) => { if (p.type !== "literal") acc[p.type] = p.value; return acc; }, {});
+        const nowMin = (parseInt(now.hour ?? "0", 10) || 0) * 60 + (parseInt(now.minute ?? "0", 10) || 0);
+
         groups.forEach((group) => {
           const coords = coordsByGroup[group.name];
           if (!coords) return;
 
           const items = itemsByGroup[group.name] ?? [];
           const topItems = items.slice(0, 5);
-          const statusColor = group.isOpen ? "#22c55e" : "#9a97ac";
-          const statusLabel = group.isOpen ? "Open now" : "Closed";
-          const bgColor = group.isOpen ? "#7c6cf0" : "#9a97ac";
+          const hoursText = (group.stations.find((sta) => sta.isOpen) ?? group.stations[0])?.hours;
+          const st = diningStatus(hoursText || undefined, nowMin);
+          const openish = st.state === "unknown" ? group.isOpen : (st.state === "open" || st.state === "closing_soon");
+          const statusColor = st.state === "open" ? "#22c55e" : st.state === "closing_soon" ? "#e0883f" : "#9a97ac";
+          const statusLabel = st.state === "unknown" ? (group.isOpen ? "Open now" : "Closed") : st.label;
+          const bgColor = openish ? "#7c6cf0" : "#9a97ac";
           const locId = locationIdByGroup[group.name] || "";
           const name = escapeHtml(group.name);
           const directions = `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}&travelmode=walking`;
@@ -84,7 +93,7 @@ export function DiningMap({
             iconAnchor: [17, 17],
           });
 
-          const viewMenuBtn = group.isOpen && locId
+          const viewMenuBtn = openish && locId
             ? `<button
                 onclick="window.__diningMapSelect && window.__diningMapSelect('${locId}')"
                 style="margin-top:8px;width:100%;background:#f1f0fb;color:#4f3fd0;border:none;border-radius:10px;padding:7px 0;font-size:12px;font-weight:700;cursor:pointer;">

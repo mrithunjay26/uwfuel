@@ -62,4 +62,6 @@ export const PATHS = {
   mealRating: (uid: string, key: string) => `users/${uid}/meal_ratings/${key}`,
   tasteEvents: (uid: string) => `users/${uid}/taste_events`,
   mealTiming: (uid: string) => `users/${uid}/meal_timing`,
+  dayOverrides: (uid: string, dateKey: string) => `users/${uid}/day_overrides/${dateKey}`,
+  dayOverride: (uid: string, dateKey: string, eventId: string) => `users/${uid}/day_overrides/${dateKey}/${eventId}`,
 } as const;

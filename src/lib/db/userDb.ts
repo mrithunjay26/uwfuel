@@ -355,6 +355,10 @@ export async function writeMealTiming(db: Database, uid: string, timing: MealTim
   await set(ref(db, PATHS.mealTiming(uid)), timing);
 }
 
+export async function writeDayOverride(db: Database, uid: string, dateKey: string, eventId: string, startMinute: number | null): Promise<void> {
+  await set(ref(db, PATHS.dayOverride(uid, dateKey, eventId)), startMinute);
+}
+
 export function newPlanId(db: Database, uid: string, dateKey: string): string {
   const key = mintRef(ref(db, PATHS.dayPlanRepo(uid, dateKey))).key;
   if (!key) throw new Error("Couldn't create a plan id.");

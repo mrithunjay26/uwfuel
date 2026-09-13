@@ -36,7 +36,7 @@ import { DiningMap } from "@/components/app/DiningMap";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { MealDetailSheet } from "@/components/app/MealDetailSheet";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
-import { assessDietarySafety, type DietaryAssessment } from "@/lib/dietary/safety";
+import { assessDietarySafety, isDietaryConflict, type DietaryAssessment } from "@/lib/dietary/safety";
 
 type PageTab = "menu" | "pantry" | "map";
 
@@ -131,7 +131,7 @@ export default function MenuPage() {
     [menuSnapshot, locationNames, locationOpenById],
   );
   const safetyByKey = useMemo(() => new Map(rawItems.map((item) => [item.unique_key, assessDietarySafety(item, setupProfile?.dietary ?? null)])), [rawItems, setupProfile]);
-  const allItems = useMemo(() => rawItems.filter((item) => safetyByKey.get(item.unique_key)?.status !== "blocked"), [rawItems, safetyByKey]);
+  const allItems = useMemo(() => rawItems.filter((item) => { const a = safetyByKey.get(item.unique_key); return !a || !isDietaryConflict(a); }), [rawItems, safetyByKey]);
 
   const locationIdByGroup = useMemo(() => {
     const map: Record<string, string> = {};

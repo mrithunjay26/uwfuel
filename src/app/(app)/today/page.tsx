@@ -11,6 +11,10 @@ import { CampusRouteMap } from "@/components/app/CampusRouteMap";
 import { ClassScheduleModal } from "@/components/app/ClassScheduleModal";
 import { Portal } from "@/components/ui/Portal";
 import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
+import { useUserDb } from "@/lib/hooks/useUserDb";
+import { useDayOverrides } from "@/lib/hooks/useDayOverrides";
+import { writeDayOverride } from "@/lib/db/userDb";
+import { diningStatus } from "@/lib/dining/status";
 import { useActivePlan } from "@/lib/hooks/useActivePlan";
 import { useActiveWorkoutPlan } from "@/lib/hooks/useActiveWorkoutPlan";
 import { useLiveLocation } from "@/lib/hooks/useLiveLocation";
@@ -59,11 +63,20 @@ const ARRIVE_RADIUS_M = 45;
 const FULL_MAP_PAD_TOP = 118;
 const FULL_MAP_PAD_BOTTOM = 210;
 
+const DAY_SLEEP_MINUTE = 22 * 60 + 30;
+
+function postponeChoices(start: number): number[] {
+  return [30, 60, 120].map((m) => start + m).filter((t) => t <= DAY_SLEEP_MINUTE);
+}
+
 export default function TodayPage() {
   const { schedule, stopsForDay, loading: scheduleLoading } = useClassSchedule();
+  const handle = useUserDb();
+  const [postponeId, setPostponeId] = useState<string | null>(null);
   const { activePlan } = useActivePlan();
   const { remindersOn } = useConfig();
   const { timing } = useMealTiming();
+  const dayOverrides = useDayOverrides(todayPacificKey());
   const workoutPlan = useActiveWorkoutPlan();
   const { customize, setCustomize } = useCustomize();
   const today = todayPacificKey();
@@ -91,6 +104,7 @@ export default function TodayPage() {
   }, []);
 
   const [diningPlaces, setDiningPlaces] = useState<DayPlace[]>([]);
+  const [hoursByLabel, setHoursByLabel] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
     getDiningLocations()
@@ -99,6 +113,9 @@ export default function TodayPage() {
         const places: DayPlace[] = Object.values(locs ?? {})
           .filter((l) => typeof l.latitude === "number" && typeof l.longitude === "number")
           .map((l) => ({ label: l.name, lat: l.latitude as number, lng: l.longitude as number }));
+        const hours: Record<string, string> = {};
+        Object.values(locs ?? {}).forEach((l) => { if (l.name && l.closes_at) hours[l.name.toLowerCase()] = l.closes_at; });
+        setHoursByLabel(hours);
         const seen = new Set<string>();
         setDiningPlaces(places.filter((p) => {
           const k = p.label.toLowerCase();
@@ -116,16 +133,32 @@ export default function TodayPage() {
     [workoutPlan, weekday],
   );
 
-  const events = useMemo(() => buildDayPlan({
-    classes: stopsForDay(weekday),
-    workout: workoutDay,
-    plannedMeals:
-      isToday && activePlan?.date === today && Array.isArray(activePlan.meals) ? activePlan.meals : [],
-    diningPlaces,
-    timing,
-  }), [schedule, weekday, workoutDay, activePlan, diningPlaces, isToday, timing]);
+  const events = useMemo(() => {
+    const base = buildDayPlan({
+      classes: stopsForDay(weekday),
+      workout: workoutDay,
+      plannedMeals:
+        isToday && activePlan?.date === today && Array.isArray(activePlan.meals) ? activePlan.meals : [],
+      diningPlaces,
+      timing,
+    });
+    const active = isToday ? dayOverrides : {};
+    if (Object.keys(active).length === 0) return base;
+    return base
+      .map((e) => {
+        const next = active[e.id];
+        if (next == null) return e;
+        return { ...e, start: next, end: next + (e.end - e.start) };
+      })
+      .sort((a, b) => a.start - b.start);
+  }, [schedule, weekday, workoutDay, activePlan, diningPlaces, isToday, timing, dayOverrides]);
 
   const stops = useMemo(() => routeStops(events), [events]);
+
+  const applyPostpone = (eventId: string, minute: number | null) => {
+    if (handle) void writeDayOverride(handle.db, handle.uid, todayPacificKey(), eventId, minute).catch(() => {});
+    setPostponeId(null);
+  };
 
   useEffect(() => {
     if (!isToday) return;
@@ -288,6 +321,7 @@ export default function TodayPage() {
                   user={position}
                   routeCoords={route?.coords ?? null}
                   follow={navOn}
+                  hoursByLabel={hoursByLabel}
                   onSelectStop={selectStop}
                   className="h-[280px] w-full"
                 />
@@ -354,6 +388,7 @@ export default function TodayPage() {
                     const isActive = stopIndex !== -1 && stopIndex === activeIdx;
                     const past = isToday && e.end <= nowMinutes;
                     const current = isToday && e.start <= nowMinutes && e.end > nowMinutes;
+                    const mealStatus = e.kind === "meal" && e.place ? diningStatus(hoursByLabel[e.place.label.toLowerCase()], nowMinutes) : null;
                     return (
                       <li key={e.id}>
                         <button
@@ -375,7 +410,10 @@ export default function TodayPage() {
                             </div>
                             <p className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-ink-soft">
                               <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${style.chip}`}>{style.label}</span>
-                              {e.subtitle}
+                              {mealStatus && mealStatus.state !== "unknown" && (
+                                <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${mealStatus.state === "open" ? "bg-carbs-soft text-carbs" : mealStatus.state === "closing_soon" ? "bg-fat-soft text-fat" : "bg-danger/15 text-danger"}`}>{mealStatus.label}</span>
+                              )}
+                              <span className="truncate">{e.subtitle}</span>
                             </p>
                           </div>
                           {stopIndex !== -1 && <Compass className="mt-1 size-4 shrink-0 text-ink-faint" />}
@@ -399,6 +437,27 @@ export default function TodayPage() {
                             {e.kind === "meal" ? "Find something to eat" : "Open the workout"}
                             <ArrowRight className="size-3" />
                           </Link>
+                        )}
+
+                        {e.kind !== "study" && isToday && (
+                          <div className="mt-1.5 pl-[74px]">
+                            {postponeId === e.id ? (
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="text-[10px] font-semibold text-ink-faint">Move to</span>
+                                {postponeChoices(e.start).map((t) => (
+                                  <button key={t} onClick={() => applyPostpone(e.id, t)} className="press rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-bold text-accent-ink">{fmtTime(t)}</button>
+                                ))}
+                                {dayOverrides[e.id] != null && (
+                                  <button onClick={() => applyPostpone(e.id, null)} className="press rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-bold text-ink-soft">Reset</button>
+                                )}
+                                <button onClick={() => setPostponeId(null)} className="press rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-bold text-ink-faint">Cancel</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setPostponeId(e.id)} className="press flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-ink-soft">
+                                <Clock className="size-3 text-accent" /> Postpone{dayOverrides[e.id] != null ? " · moved" : ""}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </li>
                     );
@@ -470,6 +529,7 @@ export default function TodayPage() {
                 user={position}
                 routeCoords={route?.coords ?? null}
                 follow={navOn}
+                hoursByLabel={hoursByLabel}
                 onSelectStop={selectStop}
                 zoomControl={false}
                 scrollZoom
