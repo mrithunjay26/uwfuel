@@ -301,6 +301,35 @@ export async function deletePlanFromRepo(
   await remove(ref(db, PATHS.planEntry(uid, dateKey, planId)));
 }
 
+export async function savePlanToLibrary(
+  db: Database,
+  uid: string,
+  plan: Omit<MealPlan, "created_at" | "updated_at">,
+  planId?: string,
+): Promise<string> {
+  const now = nowIso();
+  const payload: MealPlan = { ...plan, created_at: now, updated_at: now };
+  if (planId) {
+    await set(ref(db, PATHS.planLibraryEntry(uid, planId)), payload);
+    return planId;
+  }
+  const newRef = await push(ref(db, PATHS.planLibrary(uid)), payload);
+  if (!newRef.key) throw new Error("Firebase push returned no key.");
+  return newRef.key;
+}
+
+export async function deletePlanFromLibrary(db: Database, uid: string, planId: string): Promise<void> {
+  await remove(ref(db, PATHS.planLibraryEntry(uid, planId)));
+}
+
+export async function setWeekdayPlan(db: Database, uid: string, weekday: string, planId: string): Promise<void> {
+  await set(ref(db, PATHS.planScheduleDay(uid, weekday)), planId);
+}
+
+export async function clearWeekdayPlan(db: Database, uid: string, weekday: string): Promise<void> {
+  await remove(ref(db, PATHS.planScheduleDay(uid, weekday)));
+}
+
 export async function setMealRating(
   db: Database,
   uid: string,

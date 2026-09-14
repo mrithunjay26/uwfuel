@@ -14,9 +14,12 @@ import {
   Clock,
   DollarSign,
   Flame,
+  AlertTriangle,
+  Bookmark,
   Footprints,
   Heart,
   Loader2,
+  Repeat,
   MapPin,
   Minus,
   Navigation,
@@ -48,7 +51,9 @@ import { mealFoodKey }      from "@/lib/planner/tasteKey";
 import { useMealTiming }   from "@/lib/hooks/useMealTiming";
 import { minutesToClock, clockToMinutes, MEAL_TIMING_TYPES, type MealTiming } from "@/lib/planner/mealTiming";
 import { isOpenAt } from "@/lib/dining/status";
-import { usePlanRepo }     from "@/lib/hooks/usePlanRepo";
+import { usePlanLibrary } from "@/lib/hooks/usePlanLibrary";
+import { usePlanSchedule } from "@/lib/hooks/usePlanSchedule";
+import { planConflicts } from "@/lib/planner/feasibility";
 import {
   useGeolocation,
   haversineMetres,
@@ -65,7 +70,7 @@ import {
 } from "@/lib/planner/fitDay";
 import { useFoodInventory } from "@/lib/hooks/useFoodInventory";
 import { extractJsonObject } from "@/lib/ai/json";
-import { setActivePlan, clearActivePlan, savePlanToRepo, deletePlanFromRepo, logFoodItem, newPlanId, logTasteEvent, setMealRating, writeMealTiming } from "@/lib/db/userDb";
+import { setActivePlan, clearActivePlan, savePlanToRepo, savePlanToLibrary, deletePlanFromLibrary, setWeekdayPlan, clearWeekdayPlan, logFoodItem, newPlanId, logTasteEvent, setMealRating, writeMealTiming } from "@/lib/db/userDb";
 import {
   getDiningLocations,
   resolveMenuDate,
@@ -100,8 +105,8 @@ import {
 } from "@/lib/utils/notifications";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { MealRouteMap, type RoutePoint } from "@/components/app/MealRouteMap";
-import type { ClassStop, MealPlan, PlanMeal, MealType, MealRatingValue } from "@/lib/db/types";
-import type { PlanRepoItem } from "@/lib/hooks/usePlanRepo";
+import type { ClassStop, MealPlan, PlanMeal, MealType, MealRatingValue, Weekday } from "@/lib/db/types";
+import type { PlanLibraryItem } from "@/lib/hooks/usePlanLibrary";
 
 type PlanTab = "ai" | "manual";
 const MEAL_COUNTS = [2, 3, 4, 5] as const;
@@ -329,14 +334,15 @@ export default function PlanPage() {
   const { cohereKey, hasCohere, dailyBudget, setDailyBudget, remindersOn, setRemindersOn } = useConfig();
   const handle                  = useUserDb();
   const { profile }             = useUserProfile();
-  const { todayStops }          = useClassSchedule();
+  const { todayStops, stopsForDay } = useClassSchedule();
   const { profile: setupProfile } = useOnboardingProfile();
   const { expenses } = useFoodExpenses();
   const { activePlan }          = useActivePlan();
   const { profile: prefs, ratings: mealRatings } = useMealPrefs();
   const { timing } = useMealTiming();
   const today                   = todayPacificKey();
-  const { plans: savedPlans, loading: plansLoading } = usePlanRepo(today);
+  const { plans: libraryPlans, loading: libraryLoading } = usePlanLibrary();
+  const { schedule: planSchedule } = usePlanSchedule();
   const {
     position: userGeo,
     loading: geoLoading,
@@ -357,6 +363,7 @@ export default function PlanPage() {
   const [nearbyDiet,   setNearbyDiet]   = useState<MenuFilter>("all");
   const [walkPref,     setWalkPref]     = useState<WalkPref>("medium");
   const [showRepo,     setShowRepo]     = useState(false);
+  const [savedToLibrary, setSavedToLibrary] = useState(false);
   const [generating,   setGenerating]   = useState(false);
   const [genError,     setGenError]     = useState<string | null>(null);
   const [genElapsed,   setGenElapsed]   = useState(0);
@@ -491,6 +498,19 @@ export default function PlanPage() {
     () => new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "long" }).format(new Date()),
     [],
   );
+  const todayWeekdayKey = planWeekday.toLowerCase() as Weekday;
+  const recurringToday = useMemo(() => {
+    const id = planSchedule[todayWeekdayKey];
+    return id ? libraryPlans.find((p) => p.id === id) ?? null : null;
+  }, [planSchedule, todayWeekdayKey, libraryPlans]);
+
+  const assignedDaysFor = (planId: string): Set<Weekday> => {
+    const days = new Set<Weekday>();
+    (Object.keys(planSchedule) as Weekday[]).forEach((w) => {
+      if (planSchedule[w] === planId) days.add(w);
+    });
+    return days;
+  };
 
   const requestPlace = useMemo(() => resolveCampusPlace(customRequest), [customRequest]);
 
@@ -1188,7 +1208,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
     }
   }
 
-  async function activateSavedPlan(plan: PlanRepoItem) {
+  async function activateSavedPlan(plan: PlanLibraryItem) {
     if (!handle) return;
     await setActivePlan(handle.db, handle.uid, {
       plan_id:      plan.id,
@@ -1201,12 +1221,37 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
     setShowRepo(false);
   }
 
-  async function deleteSavedPlan(plan: PlanRepoItem) {
-    if (!handle) return;
-    await deletePlanFromRepo(handle.db, handle.uid, today, plan.id).catch(() => {});
+  async function saveActiveToLibrary() {
+    if (!handle || !activePlan) return;
+    setSavedToLibrary(true);
+    await savePlanToLibrary(handle.db, handle.uid, {
+      source:       activePlan.source,
+      title:        activePlan.title,
+      summary:      "",
+      meals:        activePlan.meals,
+      daily_totals: activePlan.daily_totals,
+    }).catch(() => {});
+    setTimeout(() => setSavedToLibrary(false), 1600);
   }
 
-  function editSavedPlan(plan: PlanRepoItem) {
+  async function toggleWeekday(planId: string, weekday: Weekday) {
+    if (!handle) return;
+    if (planSchedule[weekday] === planId) {
+      await clearWeekdayPlan(handle.db, handle.uid, weekday).catch(() => {});
+    } else {
+      await setWeekdayPlan(handle.db, handle.uid, weekday, planId).catch(() => {});
+    }
+  }
+
+  async function deleteSavedPlan(plan: PlanLibraryItem) {
+    if (!handle) return;
+    await deletePlanFromLibrary(handle.db, handle.uid, plan.id).catch(() => {});
+    (Object.keys(planSchedule) as Weekday[]).forEach((w) => {
+      if (planSchedule[w] === plan.id) void clearWeekdayPlan(handle.db, handle.uid, w).catch(() => {});
+    });
+  }
+
+  function editSavedPlan(plan: PlanLibraryItem) {
     setManualMeals(
       (plan.meals ?? []).map((m): ManualEntry => ({
         id:                 `m_${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -1294,22 +1339,39 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
 
       <div className="flex-1 px-5 pb-10 pt-4">
 
+        {recurringToday && (!activePlan || activePlan.plan_id !== recurringToday.id) && (
+          <button
+            onClick={() => activateSavedPlan(recurringToday)}
+            className="press animate-pop mb-4 flex w-full items-center gap-3 rounded-[18px] border border-accent/30 bg-accent-soft/50 p-3.5 text-left"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent/15 text-accent"><Repeat className="size-4" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[10px] font-bold uppercase tracking-wide text-accent-ink">Your {planWeekday} plan is ready</span>
+              <span className="block truncate text-[13px] font-bold text-ink">{recurringToday.title}</span>
+            </span>
+            <span className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-[12px] font-bold text-accent-contrast">Use it</span>
+          </button>
+        )}
+
         {activePlan && (
           <section className="animate-pop mb-4 rounded-[22px] border border-success/30 bg-success/10 p-4 backdrop-blur-md">
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-success">Today&apos;s active plan</p>
-                <p className="mt-0.5 font-display text-[16px] font-extrabold text-ink">{activePlan.title}</p>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-success">Today&apos;s plan</p>
+                <p className="mt-0.5 truncate font-display text-[16px] font-extrabold text-ink">{activePlan.title}</p>
                 <p className="mt-0.5 text-[12px] text-ink-soft">
                   {activePlan.daily_totals.calories.toLocaleString("en-US")} of {targetKcal.toLocaleString("en-US")} kcal Â· {activePlan.daily_totals.protein}g protein Â· {formatMoney(activePlan.daily_totals.cost)}
                 </p>
               </div>
-              <button
-                onClick={handleClearPlan}
-                className="shrink-0 text-[12px] font-semibold text-danger"
-              >
-                Clear
-              </button>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <button
+                  onClick={saveActiveToLibrary}
+                  className="press flex items-center gap-1 rounded-full bg-surface px-2.5 py-1 text-[11px] font-bold text-accent-ink shadow-[var(--shadow-sm)]"
+                >
+                  {savedToLibrary ? <><CheckCircle2 className="size-3.5 text-success" /> Saved</> : <><Bookmark className="size-3.5" /> Save &amp; reuse</>}
+                </button>
+                <button onClick={handleClearPlan} className="text-[11px] font-semibold text-danger">Clear</button>
+              </div>
             </div>
             <div className="mt-3 flex flex-col gap-1.5">
               {activePlan.meals.map((meal, i) => (
@@ -1667,11 +1729,13 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
                 onClick={() => setShowRepo(!showRepo)}
                 className="flex w-full items-center justify-between px-4 py-3.5"
               >
-                <span className="text-[14px] font-bold text-ink">Load saved plans</span>
+                <span className="flex items-center gap-2 text-[14px] font-bold text-ink">
+                  <Bookmark className="size-4 text-accent" /> Saved plans
+                </span>
                 <div className="flex items-center gap-1.5 text-ink-soft">
-                  {!plansLoading && savedPlans.length > 0 && (
+                  {!libraryLoading && libraryPlans.length > 0 && (
                     <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent">
-                      {savedPlans.length}
+                      {libraryPlans.length}
                     </span>
                   )}
                   {showRepo ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
@@ -1680,42 +1744,26 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
 
               {showRepo && (
                 <div className="border-t border-line px-4 pb-4 pt-3">
-                  {plansLoading ? (
+                  {libraryLoading ? (
                     <p className="text-[13px] text-ink-soft">Loadingâ€¦</p>
-                  ) : savedPlans.length === 0 ? (
-                    <p className="text-[13px] text-ink-soft">No saved plans for today yet.</p>
+                  ) : libraryPlans.length === 0 ? (
+                    <p className="text-[13px] leading-relaxed text-ink-soft">
+                      No saved plans yet. Build a plan, then tap <span className="font-bold text-ink">Save &amp; reuse</span> to keep it and repeat it on any day of the week.
+                    </p>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      {savedPlans.map((plan) => (
-                        <div
+                    <div className="flex flex-col gap-2.5">
+                      {libraryPlans.map((plan) => (
+                        <PlanLibraryCard
                           key={plan.id}
-                          className="flex items-center gap-1 rounded-[12px] bg-surface-2 px-3 py-2.5"
-                        >
-                          <button
-                            onClick={() => activateSavedPlan(plan)}
-                            className="press min-w-0 flex-1 text-left"
-                          >
-                            <span className="block truncate text-[13px] font-bold text-ink">{plan.title}</span>
-                            <span className="block text-[11px] text-ink-soft">
-                              {plan.daily_totals.calories} kcal Â· {formatMoney(plan.daily_totals.cost)} Â·{" "}
-                              {new Date(plan.created_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => editSavedPlan(plan)}
-                            aria-label="Edit plan"
-                            className="press grid size-7 shrink-0 place-items-center rounded-full text-ink-soft hover:text-accent"
-                          >
-                            <Pencil className="size-3.5" />
-                          </button>
-                          <button
-                            onClick={() => deleteSavedPlan(plan)}
-                            aria-label="Delete plan"
-                            className="press grid size-7 shrink-0 place-items-center rounded-full text-ink-faint hover:text-danger"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </div>
+                          plan={plan}
+                          isActive={activePlan?.plan_id === plan.id}
+                          assignedDays={assignedDaysFor(plan.id)}
+                          stopsForDay={stopsForDay}
+                          onUseToday={() => activateSavedPlan(plan)}
+                          onToggleDay={(w) => toggleWeekday(plan.id, w)}
+                          onEdit={() => editSavedPlan(plan)}
+                          onDelete={() => deleteSavedPlan(plan)}
+                        />
                       ))}
                     </div>
                   )}
@@ -2015,6 +2063,94 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} â
             )}
 
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const WEEKDAY_CHIPS: { key: Weekday; label: string }[] = [
+  { key: "monday", label: "Mo" },
+  { key: "tuesday", label: "Tu" },
+  { key: "wednesday", label: "We" },
+  { key: "thursday", label: "Th" },
+  { key: "friday", label: "Fr" },
+  { key: "saturday", label: "Sa" },
+  { key: "sunday", label: "Su" },
+];
+
+function PlanLibraryCard({
+  plan, isActive, assignedDays, stopsForDay, onUseToday, onToggleDay, onEdit, onDelete,
+}: {
+  plan: PlanLibraryItem;
+  isActive: boolean;
+  assignedDays: Set<Weekday>;
+  stopsForDay: (w: Weekday) => ClassStop[];
+  onUseToday: () => void;
+  onToggleDay: (w: Weekday) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const conflictByDay = useMemo(() => {
+    const out = {} as Record<Weekday, number>;
+    for (const { key } of WEEKDAY_CHIPS) out[key] = planConflicts(plan.meals, stopsForDay(key)).length;
+    return out;
+  }, [plan.meals, stopsForDay]);
+
+  const clashDays = WEEKDAY_CHIPS.filter((d) => assignedDays.has(d.key) && conflictByDay[d.key] > 0);
+
+  return (
+    <div className={`rounded-[16px] border p-3 ${isActive ? "border-success/40 bg-success/5" : "border-line bg-surface-2"}`}>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-extrabold text-ink">{plan.title}</p>
+          <p className="mt-0.5 text-[11px] text-ink-soft">
+            {plan.daily_totals.calories.toLocaleString("en-US")} kcal Â· {plan.daily_totals.protein}g Â· {formatMoney(plan.daily_totals.cost)} Â· {plan.meals.length} meal{plan.meals.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <button onClick={onEdit} aria-label={`Edit ${plan.title}`} className="press grid size-7 shrink-0 place-items-center rounded-full text-ink-soft hover:text-accent"><Pencil className="size-3.5" /></button>
+        <button onClick={onDelete} aria-label={`Delete ${plan.title}`} className="press grid size-7 shrink-0 place-items-center rounded-full text-ink-faint hover:text-danger"><Trash2 className="size-3.5" /></button>
+      </div>
+
+      <button
+        onClick={onUseToday}
+        disabled={isActive}
+        className={`press mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-[12px] py-2 text-[12px] font-bold transition ${isActive ? "bg-success/15 text-success" : "bg-accent text-accent-contrast"}`}
+      >
+        {isActive ? <><CheckCircle2 className="size-3.5" /> Active today</> : "Use today"}
+      </button>
+
+      <div className="mt-2.5">
+        <p className="mb-1.5 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+          <Repeat className="size-3" /> Repeat weekly
+        </p>
+        <div className="flex gap-1">
+          {WEEKDAY_CHIPS.map(({ key, label }) => {
+            const on = assignedDays.has(key);
+            const conflict = conflictByDay[key] > 0;
+            return (
+              <button
+                key={key}
+                onClick={() => onToggleDay(key)}
+                aria-pressed={on}
+                aria-label={`${on ? "Stop repeating" : "Repeat"} on ${key}${conflict ? " (a meal clashes with a class)" : ""}`}
+                className={`relative grid h-8 flex-1 place-items-center rounded-[10px] text-[10px] font-bold transition ${
+                  on
+                    ? conflict ? "bg-warning text-white" : "bg-accent text-accent-contrast"
+                    : conflict ? "bg-warning/10 text-warning" : "bg-surface text-ink-soft"
+                }`}
+              >
+                {label}
+                {conflict && !on && <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-warning" />}
+              </button>
+            );
+          })}
+        </div>
+        {clashDays.length > 0 && (
+          <p className="mt-1.5 flex items-start gap-1 text-[10.5px] font-semibold text-warning">
+            <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+            A meal lands during a class on {clashDays.map((d) => d.label).join(", ")} â€” move that meal's time or the class.
+          </p>
         )}
       </div>
     </div>

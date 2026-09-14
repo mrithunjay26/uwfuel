@@ -31,6 +31,11 @@ export const PATHS = {
 
   activePlan: (uid: string) => `users/${uid}/active_plan`,
 
+  planLibrary: (uid: string) => `users/${uid}/plan_library`,
+  planLibraryEntry: (uid: string, planId: string) => `users/${uid}/plan_library/${planId}`,
+  planSchedule: (uid: string) => `users/${uid}/plan_schedule`,
+  planScheduleDay: (uid: string, weekday: string) => `users/${uid}/plan_schedule/${weekday}`,
+
   classSchedule: (uid: string) => `users/${uid}/class_schedule_by_weekday`,
 
   savedPlaces: (uid: string) => `users/${uid}/saved_places`,
