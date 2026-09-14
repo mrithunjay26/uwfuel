@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/utils/nutrition";
 import type { FoodLogItem } from "@/lib/hooks/useFoodLog";
 import type { MealRatingValue } from "@/lib/db/types";
 import { MealRatePills } from "@/components/app/MealRatePills";
+import { foodGlyph } from "@/lib/menu/glyph";
 
 interface JournalCardProps {
   entry: FoodLogItem;
@@ -70,7 +71,10 @@ export function JournalCard({ entry, index = 0, onDelete, onSave, onOpen, rating
         </span>
       ) : null}
 
-      <p className="relative line-clamp-2 text-[13px] font-bold leading-snug text-ink">{entry.name}</p>
+      <p className="relative flex items-start gap-1.5 text-[13px] font-bold leading-snug text-ink">
+        <span aria-hidden className="shrink-0 text-[15px] leading-tight">{foodGlyph(entry.name, entry.description)}</span>
+        <span className="line-clamp-2">{entry.name}</span>
+      </p>
 
       <div className="relative mt-2.5 flex items-center gap-2.5 text-[11px] font-semibold text-ink-soft">
         <span className="flex items-center gap-1">

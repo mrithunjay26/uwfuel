@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Activity, Check, Flame, Pencil, Trash2, Utensils, X, Zap } from "lucide-react";
+import { Activity, Check, Flame, Pencil, Trash2, X, Zap } from "lucide-react";
 import { useWeightLog } from "@/lib/hooks/useWeightLog";
 import { useAllLogs } from "@/lib/hooks/useAllLogs";
 import { useFoodLog, type FoodLogItem } from "@/lib/hooks/useFoodLog";
 import { useMealPrefs } from "@/lib/hooks/useMealPrefs";
 import { mealFoodKey } from "@/lib/planner/tasteKey";
+import { foodGlyph } from "@/lib/menu/glyph";
 import { MealRatePills } from "@/components/app/MealRatePills";
 import type { MealRatingValue } from "@/lib/db/types";
 import { useUserProfile } from "@/lib/hooks/useUserProfile";
@@ -685,8 +686,8 @@ function FoodLogRow({
         className="press flex min-w-0 flex-1 items-center gap-2 text-left"
         aria-label={`Details for ${entry.name}`}
       >
-        <span className="ui-tile grid size-8 shrink-0 place-items-center bg-surface-3 text-ink-soft">
-          <Utensils className="size-4" />
+        <span aria-hidden className="ui-tile grid size-8 shrink-0 place-items-center bg-surface-3 text-[17px] leading-none">
+          {foodGlyph(entry.name, entry.description)}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-ink">{entry.name}</span>

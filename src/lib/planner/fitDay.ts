@@ -33,6 +33,7 @@ export interface FitDayInput {
   picks?: PlannerPick[];
   bias?: (item: PlannerItem) => number;
   isLocationOpen?: (locationId: string, minute: number) => boolean;
+  nearnessWeight?: number;
 }
 
 export interface FitDayResult {
@@ -83,7 +84,7 @@ interface Draft {
 }
 
 function clockToMinute(clock: string): number {
-  const m = /(d{1,2})(?::(d{2}))?s*(AM|PM)?/i.exec((clock || "").trim());
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i.exec((clock || "").trim());
   if (!m) return 0;
   let h = parseInt(m[1], 10);
   const min = parseInt(m[2] || "0", 10);
@@ -109,6 +110,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
   input.pool.forEach((item, i) => rank.set(item.key, 1 - i / Math.max(1, input.pool.length)));
   const bias = (item: PlannerItem): number => input.bias?.(item) ?? 0;
   const isOpen = (item: PlannerItem, minute: number): boolean => input.isLocationOpen?.(item.location_id, minute) ?? true;
+  const nearW = input.nearnessWeight ?? 2;
 
   const shares = slots.map((s) => TYPE_SHARE[s.type] ?? 0.2);
   const shareSum = shares.reduce((a, b) => a + b, 0) || 1;
@@ -179,7 +181,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
     if (!main) {
       main = bestOf(
         input.pool,
-        (item) => (rank.get(item.key) ?? 0) * 1.4 + nearness(item, slot.near) * 2 + calorieFit(item.calories, want) * 1.6 + bias(item) * BIAS_WEIGHT,
+        (item) => (rank.get(item.key) ?? 0) * 1.4 + nearness(item, slot.near) * nearW + calorieFit(item.calories, want) * 1.6 + bias(item) * BIAS_WEIGHT,
         (item) => item.price <= budget && isOpen(item, slotMinute),
       );
     }
@@ -212,7 +214,7 @@ export function fitDay(input: FitDayInput): FitDayResult {
     const swap =
       bestOf(
         input.pool,
-        (item) => (rank.get(item.key) ?? 0) * 1.2 + nearness(item, d.near) * 2 + calorieFit(item.calories, d.kcalTarget) * 1.6,
+        (item) => (rank.get(item.key) ?? 0) * 1.2 + nearness(item, d.near) * nearW + calorieFit(item.calories, d.kcalTarget) * 1.6,
         (item) => item.price <= room && isOpen(item, clockToMinute(d.time)),
       ) ?? bestOf(input.pool, (item) => -item.price, (item) => item.price < d.main.price && isOpen(item, clockToMinute(d.time)));
 

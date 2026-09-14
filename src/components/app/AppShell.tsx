@@ -95,13 +95,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <InstallBanner />
 
       <nav className={`app-navigation fixed inset-x-0 z-40 ${navTop ? "top-0" : "bottom-0"}`}>
-        <div className={`relative mx-auto max-w-[480px] px-2 ${navTop ? "pt-[max(env(safe-area-inset-top),8px)]" : "pb-[max(env(safe-area-inset-bottom),8px)]"}`}>
+        <div className={`relative mx-auto max-w-[480px] px-3 ${navTop ? "pt-[max(env(safe-area-inset-top),8px)]" : "pb-[max(env(safe-area-inset-bottom),10px)]"}`}>
           {customize.showReachShortcut && secondary.href !== primary.href && (
             <Link
               href={secondary.href}
               onClick={() => haptic("light")}
               aria-label={`Quick open ${secondary.label}`}
-              className={`press absolute z-10 grid size-10 place-items-center rounded-full border border-line bg-surface/90 text-accent shadow-[var(--shadow-md)] backdrop-blur-xl ${customize.handedness === "left" ? "left-4" : "right-4"} ${navTop ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]"}`}
+              className={`press tap-target absolute z-10 grid size-10 place-items-center rounded-full border border-line bg-surface/90 text-accent shadow-[var(--shadow-md)] backdrop-blur-xl ${customize.handedness === "left" ? "left-4" : "right-4"} ${navTop ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]"}`}
             >
               <SecondaryIcon className="size-[18px]" />
             </Link>
@@ -173,13 +173,15 @@ function NavItem({
         dims.label,
         active ? "text-accent" : "text-ink-faint",
       )}
-      style={{ maxWidth: dims.item + 10, minHeight: dims.item }}
+      style={{ maxWidth: dims.item + 12, minHeight: dims.item }}
     >
       {active && (
-        <span className="absolute -top-0.5 h-1 w-1 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
+        <span aria-hidden className="absolute inset-x-0.5 inset-y-1 rounded-[15px] bg-accent-soft transition" />
       )}
-      <Icon style={{ width: dims.icon, height: dims.icon }} strokeWidth={active ? 2.5 : 2} />
-      {showLabel && <span className="max-w-full truncate">{label}</span>}
+      <span className="relative z-10 flex flex-col items-center gap-1">
+        <Icon style={{ width: dims.icon, height: dims.icon }} strokeWidth={active ? 2.5 : 2} />
+        {showLabel && <span className="max-w-full truncate">{label}</span>}
+      </span>
     </Link>
   );
 }

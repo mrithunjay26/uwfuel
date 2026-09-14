@@ -14,7 +14,8 @@ import { useClassSchedule } from "@/lib/hooks/useClassSchedule";
 import { useUserDb } from "@/lib/hooks/useUserDb";
 import { useDayOverrides } from "@/lib/hooks/useDayOverrides";
 import { writeDayOverride } from "@/lib/db/userDb";
-import { diningStatus } from "@/lib/dining/status";
+import { diningStatus, type DiningStatus } from "@/lib/dining/status";
+import { locationHoursText, pacificWeekday } from "@/lib/dining/hours";
 import { useActivePlan } from "@/lib/hooks/useActivePlan";
 import { useActiveWorkoutPlan } from "@/lib/hooks/useActiveWorkoutPlan";
 import { useLiveLocation } from "@/lib/hooks/useLiveLocation";
@@ -113,8 +114,13 @@ export default function TodayPage() {
         const places: DayPlace[] = Object.values(locs ?? {})
           .filter((l) => typeof l.latitude === "number" && typeof l.longitude === "number")
           .map((l) => ({ label: l.name, lat: l.latitude as number, lng: l.longitude as number }));
+        const weekdayName = pacificWeekday();
         const hours: Record<string, string> = {};
-        Object.values(locs ?? {}).forEach((l) => { if (l.name && l.closes_at) hours[l.name.toLowerCase()] = l.closes_at; });
+        Object.values(locs ?? {}).forEach((l) => {
+          if (!l.name) return;
+          const ht = locationHoursText(l, weekdayName);
+          if (ht) hours[l.name.toLowerCase()] = ht;
+        });
         setHoursByLabel(hours);
         const seen = new Set<string>();
         setDiningPlaces(places.filter((p) => {
@@ -194,6 +200,9 @@ export default function TodayPage() {
   }, [stops, nowMinutes, manualIdx, isToday]);
 
   const activeStop: DayEvent | null = stops[activeIdx] ?? null;
+  const activeStatus: DiningStatus | null = activeStop?.place
+    ? diningStatus(hoursByLabel[activeStop.place.label.toLowerCase()], nowMinutes)
+    : null;
 
   useEffect(() => {
     if (!navOn || !position || !activeStop?.place || manualIdx !== null) return;
@@ -360,6 +369,7 @@ export default function TodayPage() {
               <div className="glass-panel mb-4 rounded-[22px] p-4">
                 <NextStopDetails
                   stop={activeStop}
+                  status={activeStatus}
                   eyebrow={eyebrow}
                   route={route}
                   routing={routing}
@@ -584,6 +594,7 @@ export default function TodayPage() {
                   <NextStopDetails
                     compact
                     stop={activeStop}
+                    status={activeStatus}
                     eyebrow={eyebrow}
                     route={route}
                     routing={routing}
@@ -621,9 +632,10 @@ export default function TodayPage() {
 }
 
 function NextStopDetails({
-  stop, eyebrow, route, routing, leaveBy, lateNow, mapsUrl, showSteps, onToggleSteps, navControl, compact,
+  stop, status, eyebrow, route, routing, leaveBy, lateNow, mapsUrl, showSteps, onToggleSteps, navControl, compact,
 }: {
   stop: DayEvent;
+  status?: DiningStatus | null;
   eyebrow: string;
   route: WalkRoute | null;
   routing: boolean;
@@ -646,6 +658,19 @@ function NextStopDetails({
           <p className="mt-0.5 flex items-center gap-1 truncate text-[12px] text-ink-soft">
             <MapPin className="size-3 shrink-0" />{stop.place?.label}
           </p>
+          {status && status.state !== "unknown" && (
+            <span
+              className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                status.state === "open"
+                  ? "bg-carbs-soft text-carbs"
+                  : status.state === "closing_soon"
+                    ? "bg-fat-soft text-fat"
+                    : "bg-danger/15 text-danger"
+              }`}
+            >
+              <Clock className="size-3" /> {status.label}
+            </span>
+          )}
         </div>
         <span className="shrink-0 rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-bold text-ink">
           {fmtTime(stop.start)}

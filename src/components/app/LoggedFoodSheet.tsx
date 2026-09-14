@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { Check, Clock, MapPin, Pencil, Trash2, X } from "lucide-react";
 import { formatMoney } from "@/lib/utils/nutrition";
-import { Portal } from "@/components/ui/Portal";
+import { foodGlyph } from "@/lib/menu/glyph";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import type { FoodLogItem } from "@/lib/hooks/useFoodLog";
 import type { FoodLogEntry } from "@/lib/db/types";
 
@@ -14,11 +15,7 @@ interface LoggedFoodSheetProps {
   onSave?: (id: string, patch: Partial<Omit<FoodLogEntry, "logged_at">>) => void;
 }
 
-import { useSheetDrag } from "@/lib/hooks/useSheetDrag";
-import { DragHandle } from "@/components/ui/DragHandle";
-
 export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFoodSheetProps) {
-  const drag = useSheetDrag(onClose);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "", price: "", funding: "unknown" });
 
@@ -37,8 +34,6 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
     }
   }, [entry]);
 
-  if (!entry) return null;
-
   function saveEdit() {
     if (!entry) return;
     onSave?.(entry.id, {
@@ -54,29 +49,61 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
     onClose();
   }
 
-  const carbs = entry.carbs_grams ?? 0;
-  const fat = entry.fat_grams ?? 0;
-  const cells = [
-    { label: "Calories", value: Math.round(entry.calories).toString(), unit: "", color: "text-flame" },
-    { label: "Protein", value: Math.round(entry.protein_grams).toString(), unit: "g", color: "text-protein" },
-    { label: "Carbs", value: Math.round(carbs).toString(), unit: "g", color: "text-carbs" },
-    { label: "Fat", value: Math.round(fat).toString(), unit: "g", color: "text-fat" },
-  ];
+  const carbs = entry?.carbs_grams ?? 0;
+  const fat = entry?.fat_grams ?? 0;
+  const cells = entry
+    ? [
+        { label: "Calories", value: Math.round(entry.calories).toString(), unit: "", color: "text-flame" },
+        { label: "Protein", value: Math.round(entry.protein_grams).toString(), unit: "g", color: "text-protein" },
+        { label: "Carbs", value: Math.round(carbs).toString(), unit: "g", color: "text-carbs" },
+        { label: "Fat", value: Math.round(fat).toString(), unit: "g", color: "text-fat" },
+      ]
+    : [];
+
+  const footer = entry ? (
+    <div className="flex gap-2">
+      {editing ? (
+        <>
+          <button
+            onClick={saveEdit}
+            className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-accent py-3 text-[14px] font-bold text-accent-contrast"
+          >
+            <Check className="size-4" /> Save changes
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="press rounded-[14px] bg-surface-2 px-4 py-3 text-[14px] font-bold text-ink-soft"
+          >
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          {onSave && (
+            <button
+              onClick={() => setEditing(true)}
+              className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-surface-2 py-3 text-[14px] font-bold text-ink"
+            >
+              <Pencil className="size-4" /> Edit
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => { onDelete(entry.id); onClose(); }}
+              className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-danger/10 py-3 text-[14px] font-bold text-danger"
+            >
+              <Trash2 className="size-4" /> Delete
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  ) : null;
 
   return (
-    <Portal>
-    <>
-      <div className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={entry.name}
-        className="glass-strong animate-rise fixed inset-x-0 bottom-0 z-50 mx-auto flex max-w-[480px] flex-col rounded-t-[28px] px-5 pb-[max(env(safe-area-inset-bottom),20px)] pt-4"
-        style={{ maxHeight: "88dvh", ...drag.sheetStyle }}
-      >
-        <DragHandle handleProps={drag.handleProps} className="mb-1" />
-
-        <div className="thin-scrollbar flex-1 overflow-y-auto">
+    <BottomSheet open={entry != null} onClose={onClose} label={entry?.name} snapPoints={[0.58, 0.9]} footer={footer}>
+      {entry ? (
+        <>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] font-semibold text-ink-soft">
@@ -89,10 +116,13 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
                   className="mt-1.5 w-full rounded-[10px] border border-line bg-surface-2 px-2.5 py-1.5 font-display text-[18px] font-extrabold text-ink outline-none focus:border-accent"
                 />
               ) : (
-                <h2 className="mt-1.5 font-display text-[20px] font-extrabold leading-tight text-ink">{entry.name}</h2>
+                <h2 className="mt-1.5 flex items-center gap-2 font-display text-[20px] font-extrabold leading-tight text-ink">
+                  <span aria-hidden className="text-[22px] leading-none">{foodGlyph(entry.name, entry.description)}</span>
+                  {entry.name}
+                </h2>
               )}
             </div>
-            <button onClick={onClose} className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-3 text-ink-soft">
+            <button onClick={onClose} aria-label="Close" className="tap-target grid shrink-0 place-items-center rounded-full bg-surface-3 text-ink-soft">
               <X className="size-4" />
             </button>
           </div>
@@ -147,48 +177,9 @@ export function LoggedFoodSheet({ entry, onClose, onDelete, onSave }: LoggedFood
               <p className="mt-1 text-[13px] leading-relaxed text-ink-soft">{entry.description}</p>
             </div>
           )}
-        </div>
-
-        <div className="mt-3 flex gap-2">
-          {editing ? (
-            <>
-              <button
-                onClick={saveEdit}
-                className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-accent py-3 text-[14px] font-bold text-accent-contrast"
-              >
-                <Check className="size-4" /> Save changes
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="press rounded-[14px] bg-surface-2 px-4 py-3 text-[14px] font-bold text-ink-soft"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              {onSave && (
-                <button
-                  onClick={() => setEditing(true)}
-                  className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-surface-2 py-3 text-[14px] font-bold text-ink"
-                >
-                  <Pencil className="size-4" /> Edit
-                </button>
-              )}
-              {onDelete && (
-                <button
-                  onClick={() => { onDelete(entry.id); onClose(); }}
-                  className="press flex flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-danger/10 py-3 text-[14px] font-bold text-danger"
-                >
-                  <Trash2 className="size-4" /> Delete
-                </button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </>
-    </Portal>
+        </>
+      ) : null}
+    </BottomSheet>
   );
 }
 

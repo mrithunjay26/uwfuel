@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Boxes, Camera, MapPin, Maximize2, Minimize2, Search, UtensilsCrossed, X } from "lucide-react";
+import { Boxes, Camera, MapPin, Maximize2, Minimize2, Search, SlidersHorizontal, UtensilsCrossed, X } from "lucide-react";
 import { Portal } from "@/components/ui/Portal";
 import { useCustomize } from "@/lib/customize/CustomizeContext";
 import { MealCard } from "@/components/app/MealCard";
@@ -35,6 +35,7 @@ import { estimateProteinGrams, estimateMacros } from "@/lib/utils/nutrition";
 import { DiningMap } from "@/components/app/DiningMap";
 import { AuroraHeader } from "@/components/app/AuroraHeader";
 import { MealDetailSheet } from "@/components/app/MealDetailSheet";
+import { BottomSheet } from "@/components/ui/BottomSheet";
 import { useOnboardingProfile } from "@/lib/hooks/useOnboardingProfile";
 import { assessDietarySafety, isDietaryConflict, type DietaryAssessment } from "@/lib/dietary/safety";
 
@@ -273,7 +274,7 @@ export default function MenuPage() {
               <button
                 onClick={() => { setScanTarget("log"); setScanOpen(true); }}
                 aria-label="Scan a meal"
-                className="press grid size-9 place-items-center rounded-full bg-accent text-accent-contrast shadow-[var(--shadow-sm)]"
+                className="press tap-target grid place-items-center rounded-full bg-accent text-accent-contrast shadow-[var(--shadow-sm)]"
               >
                 <Camera className="size-[18px]" />
               </button>
@@ -290,7 +291,8 @@ export default function MenuPage() {
             <button
               key={t}
               onClick={() => setPageTab(t)}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded-[12px] py-2 text-[13px] font-bold transition ${
+              aria-pressed={pageTab === t}
+              className={`press flex flex-1 items-center justify-center gap-1.5 rounded-[12px] py-2 text-[13px] font-bold transition ${
                 pageTab === t ? "seg-active" : "text-ink-soft"
               }`}
             >
@@ -312,7 +314,8 @@ export default function MenuPage() {
             {search && (
               <button
                 onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-faint"
+                aria-label="Clear search"
+                className="tap-target absolute right-1 top-1/2 grid -translate-y-1/2 place-items-center text-ink-faint"
               >
                 <X className="size-4" />
               </button>
@@ -321,39 +324,41 @@ export default function MenuPage() {
         )}
       </AuroraHeader>
 
-      {pageTab === "menu" ? (
-        <MenuTabContent
-          locationGroups={locationGroups}
-          selectedGroup={selectedGroup}
-          onSelectGroup={setSelectedGroup}
-          filters={FILTER_CHIPS}
-          activeFilter={activeFilter}
-          onFilter={setActiveFilter}
-          items={displayItems}
-          loading={dataLoading}
-          error={dataError}
-          onLog={handleLog}
-          onOpen={setDetailItem}
-          loggingId={loggingId}
-          totalItems={allItems.length}
-          hiddenUnsafe={rawItems.length - allItems.length}
-          safetyByKey={safetyByKey}
-        />
-      ) : pageTab === "pantry" ? (
-        <PantryTab
-          canScan={SCAN_ENABLED}
-          onScanShelf={() => { setScanTarget("pantry"); setScanOpen(true); }}
-        />
-      ) : (
-        <MapTabContent
-          locations={locations}
-          allItems={allItems}
-          loading={dataLoading}
-          locationIdByGroup={locationIdByGroup}
-          onLocationSelect={handleLocationSelect}
-          userLocation={userGeo}
-        />
-      )}
+      <div key={pageTab} className="tab-panel-anim">
+        {pageTab === "menu" ? (
+          <MenuTabContent
+            locationGroups={locationGroups}
+            selectedGroup={selectedGroup}
+            onSelectGroup={setSelectedGroup}
+            filters={FILTER_CHIPS}
+            activeFilter={activeFilter}
+            onFilter={setActiveFilter}
+            items={displayItems}
+            loading={dataLoading}
+            error={dataError}
+            onLog={handleLog}
+            onOpen={setDetailItem}
+            loggingId={loggingId}
+            totalItems={allItems.length}
+            hiddenUnsafe={rawItems.length - allItems.length}
+            safetyByKey={safetyByKey}
+          />
+        ) : pageTab === "pantry" ? (
+          <PantryTab
+            canScan={SCAN_ENABLED}
+            onScanShelf={() => { setScanTarget("pantry"); setScanOpen(true); }}
+          />
+        ) : (
+          <MapTabContent
+            locations={locations}
+            allItems={allItems}
+            loading={dataLoading}
+            locationIdByGroup={locationIdByGroup}
+            onLocationSelect={handleLocationSelect}
+            userLocation={userGeo}
+          />
+        )}
+      </div>
 
       <MealDetailSheet
         item={detailItem}
@@ -398,44 +403,69 @@ function MenuTabContent({
   hiddenUnsafe:    number;
   safetyByKey:     Map<string, DietaryAssessment>;
 }) {
+  const [filterOpen, setFilterOpen] = useState(false);
+  const activeCount = (selectedGroup ? 1 : 0) + (activeFilter !== "all" ? 1 : 0);
+  const activeFilterLabel = filters.find((f) => f.value === activeFilter)?.label ?? "";
+
   return (
     <div className="flex-1 px-5 pb-6 pt-4">
 
-      {locationGroups.length > 0 && (
-        <div className="no-scrollbar -mx-5 flex gap-2.5 overflow-x-auto px-5 pb-1">
-          <GroupChip
-            label="All"
-            isOpen={true}
-            active={!selectedGroup}
-            onClick={() => onSelectGroup(null)}
-          />
-          {locationGroups.map((g) => (
-            <GroupChip
-              key={g.name}
-              label={g.name}
-              isOpen={g.isOpen}
-              active={selectedGroup === g.name}
-              onClick={() => onSelectGroup(selectedGroup === g.name ? null : g.name)}
-            />
-          ))}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setFilterOpen(true)}
+          className="tap-target flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3.5 text-[12px] font-bold text-ink-soft"
+        >
+          <SlidersHorizontal className="size-3.5" /> Filters
+          {activeCount > 0 && (
+            <span className="grid size-4 place-items-center rounded-full bg-accent text-[9px] font-bold text-accent-contrast">{activeCount}</span>
+          )}
+        </button>
+        <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+          {selectedGroup && (
+            <button onClick={() => onSelectGroup(null)} className="flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1.5 text-[11px] font-bold text-accent-ink">
+              {selectedGroup} <X className="size-3" />
+            </button>
+          )}
+          {activeFilter !== "all" && (
+            <button onClick={() => onFilter("all")} className="flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1.5 text-[11px] font-bold text-accent-ink">
+              {activeFilterLabel} <X className="size-3" />
+            </button>
+          )}
         </div>
-      )}
-
-      <div className="no-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5 pb-1">
-        {filters.map(({ value, label }) => (
-          <button
-            key={value}
-            onClick={() => onFilter(value)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-bold transition ${
-              activeFilter === value
-                ? "bg-accent text-accent-contrast"
-                : "bg-surface text-ink-soft"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
       </div>
+
+      <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} label="Filters" snapPoints={[0.5, 0.9]}>
+        <div className="pt-1">
+          {locationGroups.length > 0 && (
+            <>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">Dining location</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <GroupChip label="All" isOpen active={!selectedGroup} onClick={() => onSelectGroup(null)} />
+                {locationGroups.map((g) => (
+                  <GroupChip key={g.name} label={g.name} isOpen={g.isOpen} active={selectedGroup === g.name} onClick={() => onSelectGroup(selectedGroup === g.name ? null : g.name)} />
+                ))}
+              </div>
+            </>
+          )}
+          <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-ink-faint">Show</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {filters.map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => onFilter(value)}
+                className={`rounded-full px-3.5 py-2 text-[12px] font-bold transition ${
+                  activeFilter === value ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setFilterOpen(false)} className="mt-6 w-full rounded-[14px] bg-accent py-3 text-[14px] font-bold text-accent-contrast">
+            Show results
+          </button>
+        </div>
+      </BottomSheet>
 
       {!loading && !error && totalItems > 0 && (
         <p className="mt-3 text-[12px] text-ink-faint">

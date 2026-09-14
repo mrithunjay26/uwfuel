@@ -6,8 +6,8 @@
   --surface-2: #f3f4f8;
   --surface-3: #e8eaf1;
   --ink: #14161d;
-  --ink-soft: #61677a;
-  --ink-faint: #9298a8;
+  --ink-soft: #5b6070;
+  --ink-faint: #5c6472;
   --line: #e4e6ee;
   --line-strong: #d3d6e1;
 
@@ -80,8 +80,8 @@
   --surface-2: #1a1d28;
   --surface-3: #232735;
   --ink: #f4f5fa;
-  --ink-soft: #969cb0;
-  --ink-faint: #616678;
+  --ink-soft: #a2a9bd;
+  --ink-faint: #878ea2;
   --line: #262a37;
   --line-strong: #343a4c;
 
@@ -431,6 +431,8 @@ textarea::placeholder {
 
 .ui-tile { border-radius: var(--ui-radius, 12px); }
 
+.tap-target { min-width: 44px; min-height: 44px; }
+
 [data-panel="solid"] :is(.glass-panel, .glass-strong) {
   background: var(--bg) !important;
   -webkit-backdrop-filter: none !important;
@@ -630,4 +632,5 @@ textarea::placeholder {
 
 @media (pointer: coarse) {
   button, a, input, select, textarea { min-height: 44px; }
+  button, a[role="button"] { min-width: 44px; }
 }

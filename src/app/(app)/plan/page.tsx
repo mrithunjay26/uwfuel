@@ -84,6 +84,8 @@ import {
   type FlatMenuItem,
   type MenuFilter,
 } from "@/lib/menu/flattenMenu";
+import { resolveCampusPlace } from "@/lib/campus/buildings";
+import { DINING_HOURS_OVERRIDE, locationHoursText } from "@/lib/dining/hours";
 import {
   dailyTargetCalories,
   formatMoney,
@@ -106,7 +108,23 @@ const MEAL_COUNTS = [2, 3, 4, 5] as const;
 type MealCount = typeof MEAL_COUNTS[number];
 const MEAL_TYPES: MealType[] = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
-const PROMPT_MENU_LIMIT = 60;
+const DINING_BUILDING_ALIAS: Record<string, string> = {
+  "Local Point": "Lander Hall",
+  "Center Table": "Willow Hall",
+  "District Market": "Alder Hall",
+  "Husky Den": "Husky Union Building",
+};
+
+type WalkPref = "short" | "medium" | "long";
+
+const WALK_TUNE: Record<WalkPref, { nearnessWeight: number; minutes: number; label: string; hint: string; prompt: string }> = {
+  short:  { nearnessWeight: 3.4, minutes: 5,  label: "Short", hint: "Stay right by where I am",
+            prompt: "WALK TOLERANCE: short — every meal must be within about a 5-minute walk of the listed spot. Do not send the student across campus for food." },
+  medium: { nearnessWeight: 2,   minutes: 10, label: "Balanced", hint: "A little walking is fine",
+            prompt: "WALK TOLERANCE: balanced — keep meals reasonably close (about a 10-minute walk), but a better-fitting option a little farther is fine." },
+  long:   { nearnessWeight: 0.7, minutes: 20, label: "Farther OK", hint: "I'll walk for a better fit",
+            prompt: "WALK TOLERANCE: flexible — the student will happily walk up to ~20 minutes for a meal that better fits their calorie and protein goals. Prioritize the best nutritional fit over minimizing distance." },
+};
 
 function diversifyByLocation(items: PlannerItem[], limit: number): PlannerItem[] {
   const byLoc = new Map<string, PlannerItem[]>();
@@ -144,6 +162,7 @@ function firstFreeMinute(classes: ClassBlock[], from: number, to: number): numbe
 }
 
 function anchorClass(classes: ClassBlock[], minute: number): ClassBlock | null {
+  for (const c of classes) if (c.start <= minute && c.end >= minute) return c;
   let before: ClassBlock | null = null;
   for (const c of classes) if (c.end <= minute && (!before || c.end > before.end)) before = c;
   if (before) return before;
@@ -336,6 +355,7 @@ export default function PlanPage() {
   const [nearbyOn,     setNearbyOn]     = useState(false);
   const [maxWalkMin,   setMaxWalkMin]   = useState(20);
   const [nearbyDiet,   setNearbyDiet]   = useState<MenuFilter>("all");
+  const [walkPref,     setWalkPref]     = useState<WalkPref>("medium");
   const [showRepo,     setShowRepo]     = useState(false);
   const [generating,   setGenerating]   = useState(false);
   const [genError,     setGenError]     = useState<string | null>(null);
@@ -351,6 +371,20 @@ export default function PlanPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { setNotifGranted(notificationsGranted()); }, []);
+
+  useEffect(() => {
+    if (!handle) return;
+    try {
+      const saved = localStorage.getItem(`uwfuel:planWalk:${handle.uid}`);
+      if (saved === "short" || saved === "medium" || saved === "long") setWalkPref(saved);
+    } catch {}
+  }, [handle]);
+
+  const chooseWalkPref = useCallback((pref: WalkPref) => {
+    setWalkPref(pref);
+    if (!handle) return;
+    try { localStorage.setItem(`uwfuel:planWalk:${handle.uid}`, pref); } catch {}
+  }, [handle]);
 
   function applyBudget(value: number) {
     if (!Number.isFinite(value)) return;
@@ -399,14 +433,43 @@ export default function PlanPage() {
   const targetKcal = dailyTargetCalories(weight, weeklyRate);
   const { items: savedFoods } = useFoodInventory();
 
-  const locationCoords = useMemo(() => {
-    const out: Record<string, { lat: number; lng: number }> = {};
-    Object.entries(locations ?? {}).forEach(([id, loc]) => {
-      if (typeof loc.latitude === "number" && typeof loc.longitude === "number") {
-        out[id] = { lat: loc.latitude, lng: loc.longitude };
+  const { locationCoords, groupCoords } = useMemo(() => {
+    const idCoord: Record<string, { lat: number; lng: number }> = {};
+    const groupCoord: Record<string, { lat: number; lng: number }> = {};
+    if (!locations) return { locationCoords: idCoord, groupCoords: groupCoord };
+
+    for (const g of buildLocationGroups(locations)) {
+      let rep: { lat: number; lng: number } | null = null;
+      for (const st of g.stations) {
+        const loc = locations[st.id];
+        if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
+          rep = { lat: loc.latitude, lng: loc.longitude };
+          break;
+        }
       }
-    });
-    return out;
+      if (!rep) {
+        const labels = [
+          g.name,
+          DINING_BUILDING_ALIAS[g.name] ?? "",
+          ...g.stations.map((s) => s.name),
+          ...g.stations.map((s) => locations[s.id]?.address ?? ""),
+        ];
+        for (const label of labels) {
+          const place = resolveCampusPlace(label);
+          if (place) { rep = { lat: place.lat, lng: place.lng }; break; }
+        }
+      }
+      if (rep) {
+        groupCoord[g.name] = rep;
+        for (const st of g.stations) {
+          const loc = locations[st.id];
+          idCoord[st.id] = typeof loc?.latitude === "number" && typeof loc?.longitude === "number"
+            ? { lat: loc.latitude, lng: loc.longitude }
+            : rep;
+        }
+      }
+    }
+    return { locationCoords: idCoord, groupCoords: groupCoord };
   }, [locations]);
 
   const classBlocks = useMemo<ClassBlock[]>(
@@ -424,6 +487,13 @@ export default function PlanPage() {
     [todayStops],
   );
 
+  const planWeekday = useMemo(
+    () => new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "long" }).format(new Date()),
+    [],
+  );
+
+  const requestPlace = useMemo(() => resolveCampusPlace(customRequest), [customRequest]);
+
   const planSlots = useMemo<PlannerSlot[]>(() => {
     let snackShift = 0;
     return slotTypesFor(mealCount).map((type) => {
@@ -436,9 +506,16 @@ export default function PlanPage() {
       const fitted = firstFreeMinute(classBlocks, from, to);
       if (fitted != null && type !== "Snack") minute = fitted;
       const anchor = anchorClass(classBlocks, minute);
-      return { type, time: clockLabel(minute), near: anchor ? { lat: anchor.lat, lng: anchor.lng } : null };
+      const near = anchor
+        ? { lat: anchor.lat, lng: anchor.lng }
+        : requestPlace
+          ? { lat: requestPlace.lat, lng: requestPlace.lng }
+          : userGeo
+            ? { lat: userGeo.lat, lng: userGeo.lng }
+            : null;
+      return { type, time: clockLabel(minute), near };
     });
-  }, [mealCount, classBlocks, timing]);
+  }, [mealCount, classBlocks, timing, requestPlace, userGeo]);
 
   const plannerPool = useMemo<PlannerItem[]>(
     () => eligibleMenuItems
@@ -471,16 +548,20 @@ export default function PlanPage() {
     (slot: PlannerSlot) => {
       const near = slot.near;
       if (!near || !locations) return [] as { name: string; walkMin: number }[];
+      const slotMin = parseClock(slot.time);
       return buildLocationGroups(locations)
         .flatMap((g) => {
-          const loc = locations[g.stations[0]?.id];
-          if (!loc?.latitude || !loc?.longitude) return [];
-          return [{ name: g.name, walkMin: walkingMinutes(haversineMetres(near.lat, near.lng, loc.latitude, loc.longitude)) }];
+          const coord = groupCoords[g.name];
+          if (!coord) return [];
+          const repLoc = locations[g.stations[0]?.id];
+          const hoursText = repLoc ? locationHoursText(repLoc, planWeekday) : DINING_HOURS_OVERRIDE[g.name]?.[planWeekday];
+          if (isOpenAt(hoursText, slotMin) === false) return [];
+          return [{ name: g.name, walkMin: walkingMinutes(haversineMetres(near.lat, near.lng, coord.lat, coord.lng)) }];
         })
         .sort((a, b) => a.walkMin - b.walkMin)
         .slice(0, 3);
     },
-    [locations],
+    [locations, groupCoords, planWeekday],
   );
 
   const nearbyPick = useMemo<NearbyPick | null>(() => {
@@ -489,11 +570,11 @@ export default function PlanPage() {
     const candidates = buildLocationGroups(locations)
       .filter((g) => g.isOpen)
       .flatMap((g) => {
-        const loc = locations[g.stations[0]?.id];
-        if (!loc?.latitude || !loc?.longitude) return [];
-        const dist = haversineMetres(userGeo.lat, userGeo.lng, loc.latitude, loc.longitude);
+        const coord = groupCoords[g.name];
+        if (!coord) return [];
+        const dist = haversineMetres(userGeo.lat, userGeo.lng, coord.lat, coord.lng);
         const stationIds = new Set(g.stations.map((s) => s.id));
-        return [{ group: g, loc, dist, stationIds }];
+        return [{ group: g, coord, dist, stationIds }];
       })
       .filter((c) => walkingMinutes(c.dist) <= maxWalkMin)
       .sort((a, b) => a.dist - b.dist);
@@ -517,12 +598,12 @@ export default function PlanPage() {
           locationName: cand.group.name,
           walkMin: walkingMinutes(cand.dist),
           distanceM: Math.round(cand.dist),
-          directionsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userGeo.lat},${userGeo.lng}&destination=${cand.loc.latitude},${cand.loc.longitude}&travelmode=walking`,
+          directionsUrl: `https://www.google.com/maps/dir/?api=1&origin=${userGeo.lat},${userGeo.lng}&destination=${cand.coord.lat},${cand.coord.lng}&travelmode=walking`,
         };
       }
     }
     return null;
-  }, [userGeo, locations, eligibleMenuItems, phase, budget, maxWalkMin, nearbyDiet]);
+  }, [userGeo, locations, groupCoords, eligibleMenuItems, phase, budget, maxWalkMin, nearbyDiet]);
 
   useEffect(() => { setLoggedPick(false); }, [nearbyPick?.item.unique_key]);
 
@@ -621,10 +702,8 @@ export default function PlanPage() {
     const openWithCoords = buildLocationGroups(locations)
       .filter((g) => g.isOpen)
       .flatMap((g) => {
-        const loc = locations[g.stations[0]?.id];
-        return loc?.latitude && loc?.longitude
-          ? [{ name: g.name, lat: loc.latitude, lng: loc.longitude }]
-          : [];
+        const coord = groupCoords[g.name];
+        return coord ? [{ name: g.name, lat: coord.lat, lng: coord.lng }] : [];
       });
     return todayStops
       .filter((s) => s.lat != null && s.lng != null)
@@ -638,7 +717,7 @@ export default function PlanPage() {
         return nearest ? { stop: s, nearest } : null;
       })
       .filter((x): x is { stop: ClassStop; nearest: { name: string; walkMin: number } } => x !== null);
-  }, [todayStops, locations]);
+  }, [todayStops, locations, groupCoords]);
 
   const resolveMealLocation = useCallback(
     (meal: PlanMeal): ResolvedMealLocation | null => {
@@ -853,7 +932,7 @@ export default function PlanPage() {
   const buildPrompt = useCallback(() => {
     const budgetStr   = budget.toFixed(2);
 
-    const sample = diversifyByLocation(plannerPool, PROMPT_MENU_LIMIT)
+    const sample = diversifyByLocation(plannerPool, plannerPool.length)
       .map((i) => `- ${i.name} @ ${i.location_name} — $${i.price.toFixed(2)}, ${i.calories} cal, ${Math.round(i.protein)}g protein`)
       .join("\n");
 
@@ -874,6 +953,18 @@ export default function PlanPage() {
     const classCtx = todayStops.length > 0
       ? `Today's classes: ${todayStops.map((s) => `${s.building_label} (${s.start_time}–${s.end_time})`).join("; ")}.`
       : "";
+
+    const dayStart = classBlocks[0] ?? null;
+    const startName = dayStart
+      ? `${dayStart.label} (around ${clockLabel(dayStart.start)})`
+      : requestPlace
+        ? requestPlace.name
+        : "";
+    const startCtx = startName
+      ? `The student's day starts at ${startName}. The first meal should be a short walk from there — that's where they are before anything else.`
+      : "";
+
+    const walkCtx = WALK_TUNE[walkPref].prompt;
 
     const routeCtx = routeHints.length > 0
       ? `Routing: ${routeHints.map((r) => `after ${r.stop.building_label} (${r.stop.end_time}) → ${r.nearest.name} ~${r.nearest.walkMin} min walk`).join("; ")}.`
@@ -896,7 +987,7 @@ export default function PlanPage() {
 3. The SUM of the chosen items' prices MUST be UNDER $${budgetStr}. Pick cheaper real items so the total fits.
 4. Return exactly ${mealCount} meals — choose cheaper real items so all ${mealCount} fit under $${budgetStr}. Only return fewer if even the cheapest items can't fit.
 5. CALORIES MATTER MOST. The day must add up to about ${targetKcal} kcal. Pick the biggest plates that still fit the budget. Coming in 500+ kcal short is a failed plan.
-6. Put each meal at or near the spots listed for its time slot so the student isn't crossing campus between classes. Only pick spots that are open at that meal's time.
+6. Anchor each meal to where the student already is at that time — the spot listed for its slot, which is the place their schedule has them coming from just before the meal. The first meal should be near where their day starts. Respect the WALK TOLERANCE stated below, and only pick spots that are open at that meal's time.
 ━━━━━━━━━━━━━━━━━
 
 Respond ONLY with valid JSON (no markdown, no extra text). Keep it short — nutrition and prices
@@ -923,6 +1014,7 @@ Goal: ${phase} phase · ${targetKcal} kcal target · ${weight} lbs.
 
 WHEN AND WHERE:
 ${shape}
+${startCtx ? startCtx + "\n" : ""}${walkCtx}
 ${prefCtx ? prefCtx + "\n" : ""}${requestCtx ? requestCtx + "\n" : ""}${nearbyCtx ? nearbyCtx + "\n" : ""}${classCtx ? classCtx + "\n" : ""}${routeCtx ? routeCtx + "\n" : ""}
 MENU — choose ONLY from these real items and use their EXACT prices:
 ${sample || "(No menu items are available within this budget right now.)"}
@@ -933,13 +1025,13 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
       { role: "system" as const, content: system },
       { role: "user"   as const, content: user   },
     ];
-  }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest, prefs, locations]);
+  }, [budget, mealCount, plannerPool, planSlots, nearbySpotsFor, phase, weight, targetKcal, nearbyOn, nearbyPick, todayStops, routeHints, customRequest, prefs, locations, classBlocks, walkPref, requestPlace]);
 
   const isLocationOpen = (locationId: string, minute: number): boolean => {
     if (locationId === ANYWHERE_LOCATION) return true;
     const loc = locations?.[locationId];
     if (!loc) return true;
-    return isOpenAt(loc.closes_at, minute) !== false;
+    return isOpenAt(locationHoursText(loc, planWeekday), minute) !== false;
   };
 
   function buildPlan(picks: PlannerPick[]): { meals: PlanMeal[]; notes: string[] } {
@@ -953,6 +1045,7 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
       picks,
       bias: (item) => prefs.bias({ name: item.name, location_id: item.location_id }),
       isLocationOpen,
+      nearnessWeight: WALK_TUNE[walkPref].nearnessWeight,
     });
   }
 
@@ -1474,12 +1567,33 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
               )}
             </section>
 
-            {(todayStops.length > 0 || routeHints.length > 0) && (
-              <section className="glass-panel rounded-[22px] p-4">
+            <section className="glass-panel rounded-[22px] p-4">
                 <div className="flex items-center gap-2">
-                  <MapPin className="size-4 text-accent" />
-                  <p className="font-display text-[14px] font-bold text-ink">Class routes</p>
+                  <Footprints className="size-4 text-accent" />
+                  <p className="font-display text-[14px] font-bold text-ink">How far will you walk?</p>
                 </div>
+                <p className="mt-1 text-[11px] text-ink-soft">
+                  Meals stay near wherever your schedule has you before each one. Widen this if you would rather walk a bit more for food that fits your goals better.
+                </p>
+                <div className="mt-2.5 flex gap-1.5">
+                  {(["short", "medium", "long"] as WalkPref[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => chooseWalkPref(p)}
+                      aria-pressed={walkPref === p}
+                      className={`press flex-1 rounded-[12px] px-2 py-2 text-center transition ${walkPref === p ? "bg-accent text-accent-contrast" : "bg-surface-2 text-ink-soft"}`}
+                    >
+                      <span className="block text-[12px] font-bold">{WALK_TUNE[p].label}</span>
+                      <span className={`mt-0.5 block text-[10px] font-semibold ${walkPref === p ? "text-accent-contrast/80" : "text-ink-faint"}`}>{WALK_TUNE[p].hint}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {todayStops.length > 0 && (
+                  <p className="mt-4 flex items-center gap-1.5 font-display text-[13px] font-bold text-ink">
+                    <MapPin className="size-3.5 text-accent" /> Class routes
+                  </p>
+                )}
 
                 {todayStops.length > 0 && (
                   <div className="mt-2 flex flex-col gap-1">
@@ -1514,7 +1628,6 @@ Return exactly ${mealCount} meal(s) whose prices add up to under $${budgetStr} �
                   </p>
                 )}
               </section>
-            )}
 
             <section className="glass-panel rounded-[22px] p-4">
               <button onClick={handleToggleReminders} className="flex w-full items-center justify-between">
